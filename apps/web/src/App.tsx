@@ -68,6 +68,24 @@ type CommitResult = {
   pushed: boolean
   remote_write_enabled: boolean
 }
+type PushApproval = {
+  approval_id: string
+  repository_url: string
+  branch: string
+  commit_sha: string
+  expires_at: string
+  requires_human_approval: boolean
+  force_push: boolean
+  pull_request_created: boolean
+}
+type PushResult = {
+  status: string
+  repository_url: string
+  branch: string
+  commit_sha: string
+  forced: boolean
+  pull_request_created: boolean
+}
 type ApiError = { detail?: string }
 
 const DEFAULT_PROJECT_POLICY: ProjectPolicy = {
@@ -166,9 +184,11 @@ export default function App() {
   const [gitDiff, setGitDiff] = useState('No diff available.')
   const [gitReview, setGitReview] = useState<GitReview | null>(null)
   const [commitApproval, setCommitApproval] = useState<CommitApproval | null>(null)
+  const [pushApproval, setPushApproval] = useState<PushApproval | null>(null)
+  const [lastLocalCommitSha, setLastLocalCommitSha] = useState('')
   const [commitMessage, setCommitMessage] = useState('feat: apply reviewed Inzozi Code change')
   const [branchName, setBranchName] = useState('feature/inzozi-change')
-  const [gitReviewMessage, setGitReviewMessage] = useState('Review changes before creating a local commit. Remote push is disabled.')
+  const [gitReviewMessage, setGitReviewMessage] = useState('Review changes before creating a local commit. Remote push is separately approval-gated.')
   const [busy, setBusy] = useState(false)
   const [workspaceMessage, setWorkspaceMessage] = useState('Connect a GitHub repository to a guarded workspace.')
 
@@ -206,6 +226,13 @@ export default function App() {
     return review
   }
 
+  function invalidateGitApprovals(message: string, invalidateLocalCommit = false) {
+    setCommitApproval(null)
+    setPushApproval(null)
+    if (invalidateLocalCommit) setLastLocalCommitSha('')
+    setGitReviewMessage(message)
+  }
+
   async function connectRepository(event: FormEvent) {
     event.preventDefault()
     if (!repositoryUrl.trim()) return
@@ -221,6 +248,8 @@ export default function App() {
       setProjectPolicy(loadProjectPolicy(repositoryUrl.trim()))
       setBranchName(`feature/inzozi-change-${payload.workspace_id.slice(0, 6)}`)
       setCommitApproval(null)
+      setPushApproval(null)
+      setLastLocalCommitSha('')
       await loadTree(payload.workspace_id)
       await refreshGit(payload.workspace_id)
       await loadGitReview(payload.workspace_id)
@@ -265,8 +294,7 @@ export default function App() {
       })
       setFileSha(payload.sha256)
       setSavedContent(fileContent)
-      setCommitApproval(null)
-      setGitReviewMessage('Working tree changed. Prepare a fresh commit review before approval.')
+      invalidateGitApprovals('Working tree changed. Prepare a fresh commit review before approval.', true)
       setWorkspaceMessage(`Saved ${selectedPath}`)
       await refreshGit()
       await loadGitReview()
@@ -283,6 +311,7 @@ export default function App() {
     setBottomTab('terminal')
     setTerminalOutput(`Running ${action}…`)
     setCommitApproval(null)
+    setPushApproval(null)
     try {
       const result = await api<CommandResult>(`/api/v1/workspaces/${workspaceId}/actions`, {
         method: 'POST',
@@ -311,6 +340,8 @@ export default function App() {
       })
       setRepositoryRef(result.branch)
       setCommitApproval(null)
+      setPushApproval(null)
+      setLastLocalCommitSha('')
       setGitReviewMessage(`Safe local branch created: ${result.branch}`)
       await loadGitReview()
       await refreshGit()
@@ -325,6 +356,7 @@ export default function App() {
     event.preventDefault()
     if (!workspaceId || !commitMessage.trim()) return
     setBusy(true)
+    setPushApproval(null)
     try {
       const approval = await api<CommitApproval>(`/api/v1/workspaces/${workspaceId}/git/commit/prepare`, {
         method: 'POST',
@@ -333,7 +365,7 @@ export default function App() {
       })
       setCommitApproval(approval)
       setGitDiff(approval.diff || 'No diff available.')
-      setGitReviewMessage(`Review prepared. Approval expires at ${approvalTime(approval.expires_at)}.`)
+      setGitReviewMessage(`Local commit review prepared. Approval expires at ${approvalTime(approval.expires_at)}.`)
       setBottomTab('review')
     } catch (error) {
       setCommitApproval(null)
@@ -353,14 +385,59 @@ export default function App() {
         body: JSON.stringify({ approval_id: commitApproval.approval_id }),
       })
       setCommitApproval(null)
-      setGitReviewMessage(`Local commit created: ${result.commit_sha.slice(0, 12)}. Nothing was pushed.`)
+      setPushApproval(null)
+      setLastLocalCommitSha(result.commit_sha)
+      setGitReviewMessage(`Local commit created: ${result.commit_sha.slice(0, 12)}. Nothing was pushed; remote push needs a second approval.`)
       await refreshGit()
       await loadGitReview()
       setBottomTab('review')
     } catch (error) {
       setCommitApproval(null)
+      setLastLocalCommitSha('')
       setGitReviewMessage(error instanceof Error ? error.message : 'Commit approval failed.')
       await loadGitReview().catch(() => undefined)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function preparePush() {
+    if (!workspaceId || !lastLocalCommitSha) return
+    setBusy(true)
+    try {
+      const approval = await api<PushApproval>(`/api/v1/workspaces/${workspaceId}/git/push/prepare`, { method: 'POST' })
+      if (approval.commit_sha !== lastLocalCommitSha) {
+        setPushApproval(null)
+        setGitReviewMessage('Local HEAD changed since the reviewed commit. Refresh and create a new local commit review.')
+        return
+      }
+      setPushApproval(approval)
+      setGitReviewMessage(`Remote push review locked to ${approval.branch} @ ${approval.commit_sha.slice(0, 12)}. Expires at ${approvalTime(approval.expires_at)}.`)
+      setBottomTab('review')
+    } catch (error) {
+      setPushApproval(null)
+      setGitReviewMessage(error instanceof Error ? error.message : 'Unable to prepare remote push.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function approvePush() {
+    if (!workspaceId || !pushApproval) return
+    setBusy(true)
+    try {
+      const result = await api<PushResult>(`/api/v1/workspaces/${workspaceId}/git/push/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approval_id: pushApproval.approval_id }),
+      })
+      setPushApproval(null)
+      setGitReviewMessage(`Pushed ${result.commit_sha.slice(0, 12)} to ${result.branch}. No pull request or merge was created.`)
+      await loadGitReview()
+      setBottomTab('review')
+    } catch (error) {
+      setPushApproval(null)
+      setGitReviewMessage(error instanceof Error ? error.message : 'Remote push approval failed.')
     } finally {
       setBusy(false)
     }
@@ -383,9 +460,11 @@ export default function App() {
       setGitDiff('No diff available.')
       setGitReview(null)
       setCommitApproval(null)
+      setPushApproval(null)
+      setLastLocalCommitSha('')
       setTerminalOutput('Workspace commands will appear here.')
       setWorkspaceMessage('Workspace destroyed. Connect another repository when ready.')
-      setGitReviewMessage('Review changes before creating a local commit. Remote push is disabled.')
+      setGitReviewMessage('Review changes before creating a local commit. Remote push is separately approval-gated.')
       setAgentMessage('Connect a repository to give Aquila a real workspace context.')
       setBusy(false)
     }
@@ -412,8 +491,7 @@ export default function App() {
     setBusy(true)
     setAgentMessage('Aquila is routing this request through the selected provider policy…')
     if (mode === 'build' || mode === 'debug') {
-      setCommitApproval(null)
-      setGitReviewMessage('Aquila may change the working tree. A fresh commit review will be required afterward.')
+      invalidateGitApprovals('Aquila may change the working tree. A fresh commit review will be required afterward.', true)
     }
     try {
       const data = await api<AgentRun>('/api/v1/agent/run', {
@@ -447,6 +525,16 @@ export default function App() {
       setBusy(false)
     }
   }
+
+  const canPreparePush = Boolean(
+    workspaceId
+    && gitReview
+    && !gitReview.protected_branch
+    && !gitReview.dirty
+    && lastLocalCommitSha
+    && gitReview.head === lastLocalCommitSha
+    && !commitApproval,
+  )
 
   return (
     <main className="app-shell">
@@ -568,9 +656,9 @@ export default function App() {
           <div className="git-review-panel">
             <div className="git-review-summary">
               <div>
-                <span className="git-review-eyebrow">HUMAN APPROVAL GATE</span>
+                <span className="git-review-eyebrow">HUMAN APPROVAL GATES</span>
                 <strong>{gitReview?.branch || 'No workspace branch'}</strong>
-                <small>{gitReview?.protected_branch ? 'Protected branch · create a safe branch before commit' : 'Local commit only · remote push disabled'}</small>
+                <small>{gitReview?.protected_branch ? 'Protected branch · create a safe branch before commit' : 'Local commit and remote push use separate approvals'}</small>
               </div>
               <button type="button" disabled={!workspaceId || busy} onClick={() => loadGitReview()}>Refresh review</button>
             </div>
@@ -590,10 +678,26 @@ export default function App() {
 
               {commitApproval && (
                 <div className="commit-approval-card">
-                  <div><span>REVIEW LOCKED</span><strong>{commitApproval.changed_paths.length} changed path{commitApproval.changed_paths.length === 1 ? '' : 's'}</strong></div>
+                  <div><span>LOCAL COMMIT REVIEW LOCKED</span><strong>{commitApproval.changed_paths.length} changed path{commitApproval.changed_paths.length === 1 ? '' : 's'}</strong></div>
                   <small>Expires {approvalTime(commitApproval.expires_at)} · tree {commitApproval.tree_hash.slice(0, 12)}</small>
                   <button type="button" disabled={busy} onClick={approveCommit}>Approve local commit</button>
                 </div>
+              )}
+            </div>
+
+            <div className="remote-push-gate">
+              <div>
+                <span>REMOTE WRITE</span>
+                <strong>{lastLocalCommitSha ? `Local commit ${lastLocalCommitSha.slice(0, 12)}` : 'Create an approved local commit first'}</strong>
+                <small>No force push · no pull request · no merge</small>
+              </div>
+              {pushApproval ? (
+                <div className="push-approval-actions">
+                  <small>{pushApproval.branch} · expires {approvalTime(pushApproval.expires_at)}</small>
+                  <button type="button" disabled={busy} onClick={approvePush}>Approve remote push</button>
+                </div>
+              ) : (
+                <button type="button" disabled={!canPreparePush || busy} onClick={preparePush}>Prepare remote push</button>
               )}
             </div>
 
@@ -603,7 +707,7 @@ export default function App() {
         )}
       </section>
 
-      <footer><span>Workspace: {workspaceId ? `guarded · ${workspaceId.slice(0, 8)}` : 'disconnected'}</span><span>Route: {agentRoute}</span><span>Git: local commit gate · push disabled</span><span className="healthy">● safe policy</span></footer>
+      <footer><span>Workspace: {workspaceId ? `guarded · ${workspaceId.slice(0, 8)}` : 'disconnected'}</span><span>Route: {agentRoute}</span><span>Git: local commit + remote push approval gates</span><span className="healthy">● no auto-merge</span></footer>
     </main>
   )
 }
