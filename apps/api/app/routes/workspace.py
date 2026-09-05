@@ -4,7 +4,12 @@ from fastapi import APIRouter, HTTPException, Request
 import httpx
 
 from app.core.config import get_settings
-from app.integrations.github_app import GitHubAppError, create_installation_token, github_app_configured
+from app.integrations.github_app import (
+    GitHubAppError,
+    create_installation_token,
+    default_installation_for,
+    github_app_configured,
+)
 
 router = APIRouter(prefix="/v1/workspaces", tags=["workspaces"])
 settings = get_settings()
@@ -38,17 +43,22 @@ async def runtime_status() -> dict:
 @router.post("")
 async def create_workspace(request: Request) -> dict:
     body = await request.json()
+    repository_url = body.get("repository_url")
+    if not isinstance(repository_url, str):
+        raise HTTPException(status_code=400, detail="repository_url is required")
+
     installation_id = body.pop("installation_id", None)
-    if installation_id is not None:
-        if not isinstance(installation_id, int) or installation_id <= 0:
+    try:
+        if installation_id is None:
+            installation_id = default_installation_for(repository_url)
+        elif not isinstance(installation_id, int) or installation_id <= 0:
             raise HTTPException(status_code=400, detail="installation_id must be a positive integer")
-        repository_url = body.get("repository_url")
-        if not isinstance(repository_url, str):
-            raise HTTPException(status_code=400, detail="repository_url is required")
-        try:
+
+        if installation_id is not None:
             body["git_token"] = await create_installation_token(installation_id, repository_url)
-        except GitHubAppError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except GitHubAppError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
     payload = await _request("POST", "/v1/workspaces", json=body)
     return payload or {}
 
