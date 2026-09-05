@@ -136,8 +136,8 @@ def _git_auth_environment(root: Path, token: str) -> tuple[dict[str, str], Path]
     askpass.write_text(
         "#!/bin/sh\n"
         "case \"$1\" in\n"
-        "  *Username*) printf '%s\\n' \"$INZOI_GIT_USERNAME\" ;;\n"
-        "  *) printf '%s\\n' \"$INZOI_GIT_TOKEN\" ;;\n"
+        "  *Username*) printf '%s\\n' \"$INZOZI_GIT_USERNAME\" ;;\n"
+        "  *) printf '%s\\n' \"$INZOZI_GIT_TOKEN\" ;;\n"
         "esac\n",
         encoding="utf-8",
     )
@@ -145,8 +145,8 @@ def _git_auth_environment(root: Path, token: str) -> tuple[dict[str, str], Path]
     return {
         "GIT_ASKPASS": str(askpass),
         "GIT_ASKPASS_REQUIRE": "force",
-        "INZOI_GIT_USERNAME": "x-access-token",
-        "INZOI_GIT_TOKEN": token,
+        "INZOZI_GIT_USERNAME": "x-access-token",
+        "INZOZI_GIT_TOKEN": token,
     }, askpass
 
 
