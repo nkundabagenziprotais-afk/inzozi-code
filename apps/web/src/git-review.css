@@ -1,0 +1,242 @@
+.git-review-panel {
+  height: calc(100% - 38px);
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(90px, 1fr);
+  background: #0e1314;
+  overflow: hidden;
+}
+
+.git-review-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: #101617;
+}
+
+.git-review-summary > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.git-review-eyebrow {
+  font-size: 9px;
+  letter-spacing: .1em;
+  color: var(--accent);
+}
+
+.git-review-summary strong {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-review-summary small,
+.commit-approval-card small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.git-review-summary button,
+.git-review-form button,
+.commit-approval-card button {
+  border: 1px solid #4f7868;
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 7px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.git-review-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(230px, .55fr);
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.git-review-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.git-review-form label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  color: #aeb8b5;
+  font-size: 9px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.git-review-form input {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #0b1011;
+  color: var(--text);
+  outline: none;
+  padding: 7px 9px;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.git-review-form input:focus {
+  border-color: #4c7566;
+}
+
+.commit-approval-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title action"
+    "meta action";
+  align-items: center;
+  gap: 3px 10px;
+  padding: 8px 10px;
+  border: 1px solid #4f7868;
+  border-radius: 8px;
+  background: var(--accent-soft);
+}
+
+.commit-approval-card > div {
+  grid-area: title;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.commit-approval-card > div span {
+  color: var(--accent);
+  font-size: 8px;
+  letter-spacing: .08em;
+}
+
+.commit-approval-card > div strong {
+  font-size: 11px;
+}
+
+.commit-approval-card small {
+  grid-area: meta;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commit-approval-card button {
+  grid-area: action;
+}
+
+.git-review-message {
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  color: #9ca8a5;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.git-review-diff {
+  min-height: 0;
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  background: #0b1011;
+  color: #cbd3d0;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 1000px) {
+  .git-review-controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 800px) {
+  .git-review-panel {
+    height: 182px;
+    grid-template-rows: auto auto auto minmax(70px, 1fr);
+  }
+
+  .git-review-summary,
+  .git-review-controls {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .git-review-summary small {
+    display: none;
+  }
+
+  .git-review-controls {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .git-review-form {
+    grid-template-columns: 1fr auto;
+  }
+
+  .commit-approval-card {
+    grid-template-columns: 1fr auto;
+  }
+}
+
+@media (max-width: 430px) {
+  .git-review-panel {
+    height: 182px;
+  }
+
+  .git-review-summary {
+    gap: 7px;
+  }
+
+  .git-review-summary button {
+    padding: 6px 7px;
+  }
+
+  .git-review-form {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .git-review-form button {
+    width: 100%;
+  }
+
+  .commit-approval-card {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "title"
+      "meta"
+      "action";
+  }
+
+  .commit-approval-card button {
+    width: 100%;
+  }
+
+  .git-review-diff {
+    font-size: 9px;
+  }
+}
