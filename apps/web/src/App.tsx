@@ -2,7 +2,7 @@ import Editor from '@monaco-editor/react'
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 
 type Mode = 'ask' | 'plan' | 'design' | 'build' | 'debug' | 'review' | 'deploy'
-type BottomTab = 'terminal' | 'status' | 'diff'
+type BottomTab = 'terminal' | 'status' | 'diff' | 'review'
 type TreeEntry = { name: string; type: 'directory' | 'file' }
 type FilePayload = { path: string; content: string; sha256: string }
 type CommandResult = { exit_code: number; output: string; timed_out: boolean; action?: string }
@@ -36,6 +36,37 @@ type AgentRun = {
   notices: string[]
   checkpoint_id?: string | null
   git_diff?: string
+}
+type GitReview = {
+  branch: string
+  head: string
+  status: string
+  diff: string
+  fingerprint: string
+  protected_branch: boolean
+  changed_paths: string[]
+  dirty: boolean
+}
+type CommitApproval = {
+  approval_id: string
+  branch: string
+  head: string
+  message: string
+  status: string
+  diff: string
+  changed_paths: string[]
+  tree_hash: string
+  expires_at: string
+  requires_human_approval: boolean
+}
+type CommitResult = {
+  status: string
+  branch: string
+  commit_sha: string
+  tree_hash: string
+  message: string
+  pushed: boolean
+  remote_write_enabled: boolean
 }
 type ApiError = { detail?: string }
 
@@ -103,6 +134,14 @@ function loadProjectPolicy(repositoryUrl: string): ProjectPolicy {
   }
 }
 
+function approvalTime(value: string) {
+  try {
+    return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return value
+  }
+}
+
 export default function App() {
   const [mode, setMode] = useState<Mode>('plan')
   const [prompt, setPrompt] = useState('Review this project and propose the safest implementation plan.')
@@ -125,6 +164,11 @@ export default function App() {
   const [terminalOutput, setTerminalOutput] = useState('Workspace commands will appear here.')
   const [gitStatus, setGitStatus] = useState('No workspace connected.')
   const [gitDiff, setGitDiff] = useState('No diff available.')
+  const [gitReview, setGitReview] = useState<GitReview | null>(null)
+  const [commitApproval, setCommitApproval] = useState<CommitApproval | null>(null)
+  const [commitMessage, setCommitMessage] = useState('feat: apply reviewed Inzozi Code change')
+  const [branchName, setBranchName] = useState('feature/inzozi-change')
+  const [gitReviewMessage, setGitReviewMessage] = useState('Review changes before creating a local commit. Remote push is disabled.')
   const [busy, setBusy] = useState(false)
   const [workspaceMessage, setWorkspaceMessage] = useState('Connect a GitHub repository to a guarded workspace.')
 
@@ -153,6 +197,15 @@ export default function App() {
     setGitDiff(diff.output || 'No uncommitted diff.')
   }
 
+  async function loadGitReview(id = workspaceId) {
+    if (!id) return
+    const review = await api<GitReview>(`/api/v1/workspaces/${id}/git/review`)
+    setGitReview(review)
+    setGitStatus(review.status || 'Working tree clean.')
+    setGitDiff(review.diff || 'No uncommitted diff.')
+    return review
+  }
+
   async function connectRepository(event: FormEvent) {
     event.preventDefault()
     if (!repositoryUrl.trim()) return
@@ -166,8 +219,11 @@ export default function App() {
       })
       setWorkspaceId(payload.workspace_id)
       setProjectPolicy(loadProjectPolicy(repositoryUrl.trim()))
+      setBranchName(`feature/inzozi-change-${payload.workspace_id.slice(0, 6)}`)
+      setCommitApproval(null)
       await loadTree(payload.workspace_id)
       await refreshGit(payload.workspace_id)
+      await loadGitReview(payload.workspace_id)
       setWorkspaceMessage('Workspace ready. Select a file or ask Aquila to inspect the repository.')
       setAgentMessage('Aquila now has guarded repository context. Build and Debug runs create a preflight checkpoint before agent edits.')
     } catch (error) {
@@ -209,8 +265,11 @@ export default function App() {
       })
       setFileSha(payload.sha256)
       setSavedContent(fileContent)
+      setCommitApproval(null)
+      setGitReviewMessage('Working tree changed. Prepare a fresh commit review before approval.')
       setWorkspaceMessage(`Saved ${selectedPath}`)
       await refreshGit()
+      await loadGitReview()
     } catch (error) {
       setWorkspaceMessage(error instanceof Error ? error.message : 'Save failed.')
     } finally {
@@ -223,6 +282,7 @@ export default function App() {
     setBusy(true)
     setBottomTab('terminal')
     setTerminalOutput(`Running ${action}…`)
+    setCommitApproval(null)
     try {
       const result = await api<CommandResult>(`/api/v1/workspaces/${workspaceId}/actions`, {
         method: 'POST',
@@ -231,8 +291,76 @@ export default function App() {
       })
       setTerminalOutput(`${action}\n\n${result.output || '(no output)'}\n\nexit code: ${result.exit_code}${result.timed_out ? ' · timed out' : ''}`)
       await refreshGit()
+      await loadGitReview()
     } catch (error) {
       setTerminalOutput(error instanceof Error ? error.message : 'Command failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function createSafeBranch(event: FormEvent) {
+    event.preventDefault()
+    if (!workspaceId || !branchName.trim()) return
+    setBusy(true)
+    try {
+      const result = await api<{ branch: string; status: string }>(`/api/v1/workspaces/${workspaceId}/git/branches`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ branch_name: branchName.trim() }),
+      })
+      setRepositoryRef(result.branch)
+      setCommitApproval(null)
+      setGitReviewMessage(`Safe local branch created: ${result.branch}`)
+      await loadGitReview()
+      await refreshGit()
+    } catch (error) {
+      setGitReviewMessage(error instanceof Error ? error.message : 'Unable to create branch.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function prepareCommit(event: FormEvent) {
+    event.preventDefault()
+    if (!workspaceId || !commitMessage.trim()) return
+    setBusy(true)
+    try {
+      const approval = await api<CommitApproval>(`/api/v1/workspaces/${workspaceId}/git/commit/prepare`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: commitMessage.trim() }),
+      })
+      setCommitApproval(approval)
+      setGitDiff(approval.diff || 'No diff available.')
+      setGitReviewMessage(`Review prepared. Approval expires at ${approvalTime(approval.expires_at)}.`)
+      setBottomTab('review')
+    } catch (error) {
+      setCommitApproval(null)
+      setGitReviewMessage(error instanceof Error ? error.message : 'Unable to prepare commit review.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function approveCommit() {
+    if (!workspaceId || !commitApproval) return
+    setBusy(true)
+    try {
+      const result = await api<CommitResult>(`/api/v1/workspaces/${workspaceId}/git/commit/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approval_id: commitApproval.approval_id }),
+      })
+      setCommitApproval(null)
+      setGitReviewMessage(`Local commit created: ${result.commit_sha.slice(0, 12)}. Nothing was pushed.`)
+      await refreshGit()
+      await loadGitReview()
+      setBottomTab('review')
+    } catch (error) {
+      setCommitApproval(null)
+      setGitReviewMessage(error instanceof Error ? error.message : 'Commit approval failed.')
+      await loadGitReview().catch(() => undefined)
     } finally {
       setBusy(false)
     }
@@ -253,8 +381,11 @@ export default function App() {
       setFileSha('')
       setGitStatus('No workspace connected.')
       setGitDiff('No diff available.')
+      setGitReview(null)
+      setCommitApproval(null)
       setTerminalOutput('Workspace commands will appear here.')
       setWorkspaceMessage('Workspace destroyed. Connect another repository when ready.')
+      setGitReviewMessage('Review changes before creating a local commit. Remote push is disabled.')
       setAgentMessage('Connect a repository to give Aquila a real workspace context.')
       setBusy(false)
     }
@@ -280,6 +411,10 @@ export default function App() {
     if (!prompt.trim()) return
     setBusy(true)
     setAgentMessage('Aquila is routing this request through the selected provider policy…')
+    if (mode === 'build' || mode === 'debug') {
+      setCommitApproval(null)
+      setGitReviewMessage('Aquila may change the working tree. A fresh commit review will be required afterward.')
+    }
     try {
       const data = await api<AgentRun>('/api/v1/agent/run', {
         method: 'POST',
@@ -302,7 +437,10 @@ export default function App() {
       if (data.checkpoint_id) {
         setWorkspaceMessage(`Aquila checkpoint ${data.checkpoint_id.slice(0, 8)} created before agent edits.`)
       }
-      if (workspaceId) await refreshGit()
+      if (workspaceId) {
+        await refreshGit()
+        await loadGitReview()
+      }
     } catch (error) {
       setAgentMessage(error instanceof Error ? error.message : 'Aquila API is unavailable.')
     } finally {
@@ -417,16 +555,55 @@ export default function App() {
           <button onClick={() => setBottomTab('terminal')} className={bottomTab === 'terminal' ? 'active' : ''}>TERMINAL</button>
           <button onClick={() => { setBottomTab('status'); refreshGit() }} className={bottomTab === 'status' ? 'active' : ''}>GIT STATUS</button>
           <button onClick={() => { setBottomTab('diff'); refreshGit() }} className={bottomTab === 'diff' ? 'active' : ''}>GIT DIFF</button>
+          <button onClick={() => { setBottomTab('review'); loadGitReview() }} className={bottomTab === 'review' ? 'active' : ''}>GIT REVIEW</button>
           <span className="command-spacer" />
           <button disabled={!workspaceId || busy} onClick={() => runAction('git_status')}>status</button>
           <button disabled={!workspaceId || busy} onClick={() => runAction('python_tests')}>pytest</button>
           <button disabled={!workspaceId || busy} onClick={() => runAction('node_build')}>node build</button>
           <button disabled={!workspaceId || busy} onClick={() => runAction('php_tests')}>php tests</button>
         </div>
-        <pre className="terminal-output">{bottomTab === 'terminal' ? terminalOutput : bottomTab === 'status' ? gitStatus : gitDiff}</pre>
+        {bottomTab !== 'review' ? (
+          <pre className="terminal-output">{bottomTab === 'terminal' ? terminalOutput : bottomTab === 'status' ? gitStatus : gitDiff}</pre>
+        ) : (
+          <div className="git-review-panel">
+            <div className="git-review-summary">
+              <div>
+                <span className="git-review-eyebrow">HUMAN APPROVAL GATE</span>
+                <strong>{gitReview?.branch || 'No workspace branch'}</strong>
+                <small>{gitReview?.protected_branch ? 'Protected branch · create a safe branch before commit' : 'Local commit only · remote push disabled'}</small>
+              </div>
+              <button type="button" disabled={!workspaceId || busy} onClick={() => loadGitReview()}>Refresh review</button>
+            </div>
+
+            <div className="git-review-controls">
+              {gitReview?.protected_branch ? (
+                <form onSubmit={createSafeBranch} className="git-review-form">
+                  <label>Safe branch<input value={branchName} onChange={(e) => setBranchName(e.target.value)} placeholder="feature/project-change" /></label>
+                  <button disabled={busy || !workspaceId}>Create local branch</button>
+                </form>
+              ) : (
+                <form onSubmit={prepareCommit} className="git-review-form">
+                  <label>Commit message<input value={commitMessage} onChange={(e) => setCommitMessage(e.target.value)} maxLength={120} /></label>
+                  <button disabled={busy || !workspaceId || !gitReview?.dirty}>Prepare commit</button>
+                </form>
+              )}
+
+              {commitApproval && (
+                <div className="commit-approval-card">
+                  <div><span>REVIEW LOCKED</span><strong>{commitApproval.changed_paths.length} changed path{commitApproval.changed_paths.length === 1 ? '' : 's'}</strong></div>
+                  <small>Expires {approvalTime(commitApproval.expires_at)} · tree {commitApproval.tree_hash.slice(0, 12)}</small>
+                  <button type="button" disabled={busy} onClick={approveCommit}>Approve local commit</button>
+                </div>
+              )}
+            </div>
+
+            <div className="git-review-message">{gitReviewMessage}</div>
+            <pre className="git-review-diff">{commitApproval?.diff || gitReview?.diff || 'No reviewed diff. Refresh Git Review after making changes.'}</pre>
+          </div>
+        )}
       </section>
 
-      <footer><span>Workspace: {workspaceId ? `guarded · ${workspaceId.slice(0, 8)}` : 'disconnected'}</span><span>Route: {agentRoute}</span><span>Environment: staging bootstrap</span><span className="healthy">● safe policy</span></footer>
+      <footer><span>Workspace: {workspaceId ? `guarded · ${workspaceId.slice(0, 8)}` : 'disconnected'}</span><span>Route: {agentRoute}</span><span>Git: local commit gate · push disabled</span><span className="healthy">● safe policy</span></footer>
     </main>
   )
 }
