@@ -6,16 +6,18 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.agents.aquila import run_aquila_workflow
-from app.agents.providers import list_provider_payloads, resolve_provider_route
+from app.agents.project_policy import ProjectAIRoutingPolicy, resolve_project_provider_route
+from app.agents.providers import list_provider_payloads
 
 router = APIRouter(prefix="/v1/agent", tags=["agent"])
 
 
 class AgentRequest(BaseModel):
-    mode: Literal["ask", "plan", "build", "debug", "review", "deploy"] = "ask"
+    mode: Literal["ask", "plan", "design", "build", "debug", "review", "deploy"] = "ask"
     prompt: str = Field(min_length=1, max_length=12000)
     project_name: str = Field(default="Untitled project", max_length=120)
     workspace_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    project_policy: ProjectAIRoutingPolicy | None = None
 
 
 class AgentResponse(BaseModel):
@@ -41,7 +43,11 @@ def list_providers() -> dict:
 
 @router.post("/run", response_model=AgentResponse)
 async def run_agent(request: AgentRequest) -> AgentResponse:
-    route = resolve_provider_route(request.prompt)
+    route = resolve_project_provider_route(
+        prompt=request.prompt,
+        mode=request.mode,
+        policy=request.project_policy,
+    )
     try:
         result = await run_aquila_workflow(
             mode=request.mode,
