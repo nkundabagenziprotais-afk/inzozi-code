@@ -1,12 +1,36 @@
 import Editor from '@monaco-editor/react'
-import { FormEvent, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
 
 type Mode = 'ask' | 'plan' | 'build' | 'debug' | 'review' | 'deploy'
 type BottomTab = 'terminal' | 'status' | 'diff'
 type TreeEntry = { name: string; type: 'directory' | 'file' }
 type FilePayload = { path: string; content: string; sha256: string }
 type CommandResult = { exit_code: number; output: string; timed_out: boolean; action?: string }
-
+type ProviderItem = {
+  alias: string
+  mention: string
+  display_name: string
+  provider: string
+  kind: string
+  transport: string
+  implemented: boolean
+  configured: boolean
+  model?: string | null
+  capabilities: string[]
+}
+type AgentRun = {
+  status: string
+  provider_alias: string
+  provider: string
+  model: string
+  message: string
+  requested_providers: string[]
+  specialists: string[]
+  unknown_mentions: string[]
+  notices: string[]
+  checkpoint_id?: string | null
+  git_diff?: string
+}
 type ApiError = { detail?: string }
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -55,6 +79,8 @@ export default function App() {
   const [mode, setMode] = useState<Mode>('plan')
   const [prompt, setPrompt] = useState('Review this project and propose the safest implementation plan.')
   const [agentMessage, setAgentMessage] = useState('Connect a repository to give Aquila a real workspace context.')
+  const [agentRoute, setAgentRoute] = useState('@aquila · safe mode')
+  const [providers, setProviders] = useState<ProviderItem[]>([])
 
   const [repositoryUrl, setRepositoryUrl] = useState('')
   const [repositoryRef, setRepositoryRef] = useState('')
@@ -71,10 +97,16 @@ export default function App() {
   const [gitStatus, setGitStatus] = useState('No workspace connected.')
   const [gitDiff, setGitDiff] = useState('No diff available.')
   const [busy, setBusy] = useState(false)
-  const [workspaceMessage, setWorkspaceMessage] = useState('Public GitHub HTTPS repositories are supported in this milestone.')
+  const [workspaceMessage, setWorkspaceMessage] = useState('Connect a GitHub repository to a guarded workspace.')
 
   const dirty = fileContent !== savedContent
   const projectName = useMemo(() => repoLabel(repositoryUrl), [repositoryUrl])
+
+  useEffect(() => {
+    api<{ providers: ProviderItem[] }>('/api/v1/agent/providers')
+      .then((payload) => setProviders(payload.providers))
+      .catch(() => setProviders([]))
+  }, [])
 
   async function loadTree(id: string, path = '') {
     const payload = await api<{ path: string; entries: TreeEntry[] }>(`/api/v1/workspaces/${id}/tree?path=${encodeURIComponent(path)}`)
@@ -106,8 +138,8 @@ export default function App() {
       setWorkspaceId(payload.workspace_id)
       await loadTree(payload.workspace_id)
       await refreshGit(payload.workspace_id)
-      setWorkspaceMessage('Workspace ready. Select a file to begin.')
-      setAgentMessage('Aquila now has a connected workspace. Live model execution remains intentionally disabled.')
+      setWorkspaceMessage('Workspace ready. Select a file or ask Aquila to inspect the repository.')
+      setAgentMessage('Aquila now has guarded repository context. Build and Debug runs create a preflight checkpoint before agent edits.')
     } catch (error) {
       setWorkspaceMessage(error instanceof Error ? error.message : 'Workspace creation failed.')
     } finally {
@@ -193,21 +225,43 @@ export default function App() {
       setGitDiff('No diff available.')
       setTerminalOutput('Workspace commands will appear here.')
       setWorkspaceMessage('Workspace destroyed. Connect another repository when ready.')
+      setAgentMessage('Connect a repository to give Aquila a real workspace context.')
       setBusy(false)
     }
+  }
+
+  function mentionProvider(alias: string) {
+    const mention = `@${alias}`
+    setPrompt((current) => current.includes(mention) ? current : `${mention} ${current}`.trim())
   }
 
   async function submitAgent(event: FormEvent) {
     event.preventDefault()
     if (!prompt.trim()) return
     setBusy(true)
+    setAgentMessage('Aquila is routing this request through the selected provider policy…')
     try {
-      const data = await api<{ message?: string }>('/api/v1/agent/run', {
+      const data = await api<AgentRun>('/api/v1/agent/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode, prompt, project_name: projectName }),
+        body: JSON.stringify({
+          mode,
+          prompt,
+          project_name: projectName,
+          workspace_id: workspaceId || null,
+        }),
       })
-      setAgentMessage(data.message ?? 'Aquila returned an empty response.')
+      const noticeText = data.notices.length ? `\n\n${data.notices.join('\n')}` : ''
+      setAgentMessage(`${data.message}${noticeText}`)
+      setAgentRoute(`@${data.provider_alias} · ${data.model}`)
+      if (typeof data.git_diff === 'string' && data.git_diff.trim()) {
+        setGitDiff(data.git_diff)
+        setBottomTab('diff')
+      }
+      if (data.checkpoint_id) {
+        setWorkspaceMessage(`Aquila checkpoint ${data.checkpoint_id.slice(0, 8)} created before agent edits.`)
+      }
+      if (workspaceId) await refreshGit()
     } catch (error) {
       setAgentMessage(error instanceof Error ? error.message : 'Aquila API is unavailable.')
     } finally {
@@ -273,21 +327,37 @@ export default function App() {
             <div className="empty-editor">
               <span className="empty-mark">IC</span>
               <h2>{workspaceId ? 'Repository connected' : 'Build with Aquila'}</h2>
-              <p>{workspaceId ? 'Select a file from Explorer. Changes are written only through the guarded workspace API.' : 'Connect a repository to begin the real code-review-edit-test loop.'}</p>
+              <p>{workspaceId ? 'Select a file from Explorer or ask Aquila to inspect, plan, review, build, or debug the repository.' : 'Connect a repository to begin the real code-review-edit-test loop.'}</p>
               <small>{workspaceMessage}</small>
             </div>
           )}
         </section>
 
         <aside className="aquila panel">
-          <div className="aquila-heading"><div><span className="spark">✦</span><strong>Aquila</strong></div><small>{workspaceId ? 'Workspace connected' : 'Waiting for repository'}</small></div>
+          <div className="aquila-heading"><div><span className="spark">✦</span><strong>Aquila</strong></div><small>{agentRoute}</small></div>
           <div className="modes">
             {(['ask','plan','build','debug','review','deploy'] as Mode[]).map((item) => <button key={item} onClick={() => setMode(item)} className={mode === item ? 'active' : ''}>{item}</button>)}
           </div>
+          <div className="provider-strip" aria-label="AI providers and external agents">
+            <span className="provider-label">REFERENCE</span>
+            <div>
+              {providers.map((provider) => (
+                <button
+                  key={provider.alias}
+                  type="button"
+                  onClick={() => mentionProvider(provider.alias)}
+                  className={provider.configured ? 'provider-chip ready' : 'provider-chip pending'}
+                  title={`${provider.display_name} · ${provider.configured ? 'ready' : 'registered, connector pending'}`}
+                >
+                  @{provider.alias}<i>{provider.configured ? '●' : '○'}</i>
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="agent-output"><span className="output-label">AQUILA / {mode.toUpperCase()}</span><p>{agentMessage}</p><div className="context-card"><span>CONTEXT</span><strong>{workspaceId ? projectName : 'No workspace'}</strong><small>{selectedPath || 'No file selected'}</small></div></div>
           <form onSubmit={submitAgent} className="prompt-box">
-            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="Aquila prompt" />
-            <div><span>{mode === 'deploy' ? 'Approval required' : workspaceId ? 'Guarded workspace' : 'Mock provider'}</span><button disabled={busy}>{busy ? 'Running…' : 'Run →'}</button></div>
+            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="Aquila prompt" placeholder="Try: @chatgpt review this API, or @lovable propose a UI direction" />
+            <div><span>{mode === 'deploy' ? 'Plan only · approval required' : workspaceId ? 'Guarded workspace' : 'No repository tools'}</span><button disabled={busy}>{busy ? 'Running…' : 'Run →'}</button></div>
           </form>
         </aside>
       </section>
@@ -306,7 +376,7 @@ export default function App() {
         <pre className="terminal-output">{bottomTab === 'terminal' ? terminalOutput : bottomTab === 'status' ? gitStatus : gitDiff}</pre>
       </section>
 
-      <footer><span>Workspace: {workspaceId ? `guarded · ${workspaceId.slice(0, 8)}` : 'disconnected'}</span><span>Provider: mock-v0</span><span>Environment: staging bootstrap</span><span className="healthy">● {workspaceId ? 'workspace ready' : 'safe mode'}</span></footer>
+      <footer><span>Workspace: {workspaceId ? `guarded · ${workspaceId.slice(0, 8)}` : 'disconnected'}</span><span>Route: {agentRoute}</span><span>Environment: staging bootstrap</span><span className="healthy">● safe policy</span></footer>
     </main>
   )
 }
