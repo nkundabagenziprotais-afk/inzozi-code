@@ -11,16 +11,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.policy import PolicyError, recipe_for, resolve_inside
 
 WORKSPACE_ROOT = Path(os.getenv("WORKSPACE_ROOT", "/workspaces"))
 MAX_FILE_BYTES = int(os.getenv("WORKSPACE_MAX_FILE_BYTES", "1048576"))
 MAX_OUTPUT_BYTES = int(os.getenv("WORKSPACE_MAX_OUTPUT_BYTES", "65536"))
+MAX_SEARCH_FILE_BYTES = int(os.getenv("WORKSPACE_MAX_SEARCH_FILE_BYTES", "524288"))
+MAX_CHECKPOINT_BYTES = int(os.getenv("WORKSPACE_MAX_CHECKPOINT_BYTES", str(100 * 1024 * 1024)))
 GITHUB_HTTPS_RE = re.compile(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$")
+SEARCH_SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "vendor", "dist", "build", ".next", ".nuxt", "coverage"}
 
-app = FastAPI(title="Inzozi Code Workspace Runtime", version="0.1.1")
+app = FastAPI(title="Inzozi Code Workspace Runtime", version="0.1.3")
 
 
 class CreateWorkspaceRequest(BaseModel):
@@ -38,6 +41,10 @@ class WriteFileRequest(BaseModel):
     expected_sha256: str | None = None
 
 
+class CreateCheckpointRequest(BaseModel):
+    label: str | None = Field(default=None, max_length=120)
+
+
 def _workspace_path(workspace_id: str) -> Path:
     if not re.fullmatch(r"[0-9a-f]{32}", workspace_id):
         raise HTTPException(status_code=400, detail="Invalid workspace id")
@@ -51,6 +58,21 @@ def _repo_path(workspace_id: str) -> Path:
     path = _workspace_path(workspace_id) / "repo"
     if not path.is_dir():
         raise HTTPException(status_code=409, detail="Workspace repository is unavailable")
+    return path
+
+
+def _checkpoints_path(workspace_id: str) -> Path:
+    path = _workspace_path(workspace_id) / "checkpoints"
+    path.mkdir(exist_ok=True)
+    return path
+
+
+def _checkpoint_path(workspace_id: str, checkpoint_id: str) -> Path:
+    if not re.fullmatch(r"[0-9a-f]{32}", checkpoint_id):
+        raise HTTPException(status_code=400, detail="Invalid checkpoint id")
+    path = _checkpoints_path(workspace_id) / checkpoint_id
+    if not path.is_dir():
+        raise HTTPException(status_code=404, detail="Checkpoint not found")
     return path
 
 
@@ -82,16 +104,54 @@ def _run(argv: tuple[str, ...] | list[str], cwd: Path, timeout: int) -> dict:
     return {"exit_code": completed.returncode, "output": output, "timed_out": False}
 
 
+def _tree_size(root: Path) -> int:
+    total = 0
+    for current, dirs, files in os.walk(root, followlinks=False):
+        dirs[:] = [name for name in dirs if name != ".git"]
+        base = Path(current)
+        for name in files:
+            try:
+                total += (base / name).lstat().st_size
+            except OSError:
+                continue
+            if total > MAX_CHECKPOINT_BYTES:
+                return total
+    return total
+
+
+def _copy_snapshot(source: Path, destination: Path) -> None:
+    shutil.copytree(source, destination, ignore=shutil.ignore_patterns(".git"), symlinks=True)
+
+
+def _restore_snapshot(snapshot: Path, repo: Path) -> None:
+    for child in repo.iterdir():
+        if child.name == ".git":
+            continue
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink(missing_ok=True)
+
+    for child in snapshot.iterdir():
+        target = repo / child.name
+        if child.is_symlink():
+            os.symlink(os.readlink(child), target)
+        elif child.is_dir():
+            shutil.copytree(child, target, symlinks=True)
+        else:
+            shutil.copy2(child, target, follow_symlinks=False)
+
+
 @app.get("/health")
 def health() -> dict:
     WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
-    return {"status": "ok", "service": "workspace-runtime", "mode": "guarded-recipes"}
+    return {"status": "ok", "service": "workspace-runtime", "mode": "guarded-recipes-checkpoints"}
 
 
 @app.post("/v1/workspaces", status_code=201)
 def create_workspace(request: CreateWorkspaceRequest) -> dict:
     if not GITHUB_HTTPS_RE.fullmatch(request.repository_url):
-        raise HTTPException(status_code=400, detail="V0.1.1 accepts GitHub HTTPS repository URLs only")
+        raise HTTPException(status_code=400, detail="This milestone accepts GitHub HTTPS repository URLs only")
     WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
     workspace_id = uuid.uuid4().hex
     root = WORKSPACE_ROOT / workspace_id
@@ -126,6 +186,49 @@ def tree(workspace_id: str, path: str = "", limit: int = 300) -> dict:
     return {"path": path, "entries": entries}
 
 
+@app.get("/v1/workspaces/{workspace_id}/search")
+def search_workspace(workspace_id: str, q: str, limit: int = 80) -> dict:
+    query = q.strip()
+    if len(query) < 2 or len(query) > 120:
+        raise HTTPException(status_code=400, detail="Search query must contain 2 to 120 characters")
+    repo = _repo_path(workspace_id)
+    folded = query.casefold()
+    results: list[dict] = []
+    max_results = min(max(limit, 1), 120)
+
+    for current, dirs, files in os.walk(repo, followlinks=False):
+        dirs[:] = [name for name in dirs if name not in SEARCH_SKIP_DIRS]
+        base = Path(current)
+        for name in files:
+            if len(results) >= max_results:
+                break
+            path = base / name
+            if path.is_symlink():
+                continue
+            try:
+                if path.stat().st_size > MAX_SEARCH_FILE_BYTES:
+                    continue
+                raw = path.read_bytes()
+            except OSError:
+                continue
+            if b"\x00" in raw:
+                continue
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            relative = path.relative_to(repo).as_posix()
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                if folded in line.casefold():
+                    results.append({"path": relative, "line": line_number, "excerpt": line.strip()[:240]})
+                    if len(results) >= max_results:
+                        break
+        if len(results) >= max_results:
+            break
+
+    return {"query": query, "results": results, "truncated": len(results) >= max_results}
+
+
 @app.get("/v1/workspaces/{workspace_id}/files/{file_path:path}")
 def read_file(workspace_id: str, file_path: str) -> dict:
     repo = _repo_path(workspace_id)
@@ -141,7 +244,7 @@ def read_file(workspace_id: str, file_path: str) -> dict:
     try:
         content = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=415, detail="Binary files are not readable in V0.1.1") from exc
+        raise HTTPException(status_code=415, detail="Binary files are not readable in this milestone") from exc
     return {"path": file_path, "content": content, "sha256": hashlib.sha256(raw).hexdigest()}
 
 
@@ -191,6 +294,66 @@ def git_status(workspace_id: str) -> dict:
 @app.get("/v1/workspaces/{workspace_id}/git/diff")
 def git_diff(workspace_id: str) -> dict:
     return _run(("git", "diff", "--no-ext-diff", "--minimal"), _repo_path(workspace_id), 30)
+
+
+@app.post("/v1/workspaces/{workspace_id}/checkpoints", status_code=201)
+def create_checkpoint(workspace_id: str, request: CreateCheckpointRequest) -> dict:
+    repo = _repo_path(workspace_id)
+    size_bytes = _tree_size(repo)
+    if size_bytes > MAX_CHECKPOINT_BYTES:
+        raise HTTPException(status_code=413, detail="Working tree is too large for a V0.1 checkpoint")
+
+    checkpoint_id = uuid.uuid4().hex
+    root = _checkpoints_path(workspace_id) / checkpoint_id
+    snapshot = root / "repo"
+    root.mkdir(mode=0o700)
+    _copy_snapshot(repo, snapshot)
+    created_at = datetime.now(timezone.utc).isoformat()
+    status = _run(("git", "status", "--short", "--branch"), repo, 30)
+    metadata = {
+        "checkpoint_id": checkpoint_id,
+        "label": request.label or "Manual checkpoint",
+        "created_at": created_at,
+        "size_bytes": size_bytes,
+        "git_status": status.get("output", ""),
+    }
+    (root / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    _audit(workspace_id, "checkpoint.create", metadata)
+    return metadata
+
+
+@app.get("/v1/workspaces/{workspace_id}/checkpoints")
+def list_checkpoints(workspace_id: str) -> dict:
+    items = []
+    for root in _checkpoints_path(workspace_id).iterdir():
+        metadata = root / "metadata.json"
+        if not root.is_dir() or not metadata.is_file():
+            continue
+        try:
+            items.append(json.loads(metadata.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    items.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+    return {"checkpoints": items[:20]}
+
+
+@app.post("/v1/workspaces/{workspace_id}/checkpoints/{checkpoint_id}/restore")
+def restore_checkpoint(workspace_id: str, checkpoint_id: str) -> dict:
+    root = _checkpoint_path(workspace_id, checkpoint_id)
+    snapshot = root / "repo"
+    if not snapshot.is_dir():
+        raise HTTPException(status_code=409, detail="Checkpoint snapshot is unavailable")
+    repo = _repo_path(workspace_id)
+    _restore_snapshot(snapshot, repo)
+    _audit(workspace_id, "checkpoint.restore", {"checkpoint_id": checkpoint_id})
+    return {"checkpoint_id": checkpoint_id, "status": "restored"}
+
+
+@app.delete("/v1/workspaces/{workspace_id}/checkpoints/{checkpoint_id}", status_code=204)
+def delete_checkpoint(workspace_id: str, checkpoint_id: str) -> None:
+    root = _checkpoint_path(workspace_id, checkpoint_id)
+    shutil.rmtree(root)
+    _audit(workspace_id, "checkpoint.delete", {"checkpoint_id": checkpoint_id})
 
 
 @app.delete("/v1/workspaces/{workspace_id}", status_code=204)
