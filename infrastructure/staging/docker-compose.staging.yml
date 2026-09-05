@@ -1,0 +1,7 @@
+services:
+  api:
+    environment:
+      APP_ENV: staging
+      GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app.pem
+    volumes:
+      - "${GITHUB_APP_PRIVATE_KEY_HOST_PATH:?Set GITHUB_APP_PRIVATE_KEY_HOST_PATH}:/run/secrets/github-app.pem:ro"
