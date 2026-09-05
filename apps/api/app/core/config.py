@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     aquila_provider: str = "mock"
     aquila_model: str = "mock-v0"
+    workspace_service_url: str = "http://workspace:8100"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
