@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 
 from agents import Agent, RunConfig, Runner, set_default_openai_key
 
@@ -61,6 +62,17 @@ Unavailable referenced providers/connectors: {missing}
 """
 
 
+def _openai_model() -> str:
+    return os.getenv("OPENAI_DEFAULT_MODEL", "gpt-5.6")
+
+
+def _aquila_model(settings: Settings) -> str:
+    configured = os.getenv("AQUILA_MODEL", settings.aquila_model)
+    if configured == "mock-v0" and settings.aquila_provider != "mock":
+        return _openai_model()
+    return configured
+
+
 def _chatgpt_specialist(model: str) -> Agent[AquilaContext]:
     return Agent[AquilaContext](
         name="ChatGPT specialist",
@@ -73,11 +85,15 @@ def _chatgpt_specialist(model: str) -> Agent[AquilaContext]:
     )
 
 
-def _openai_key(settings: Settings) -> str | None:
-    if not settings.openai_api_key:
-        return None
-    value = settings.openai_api_key.get_secret_value()
-    return value or None
+def _openai_key() -> str | None:
+    return os.getenv("OPENAI_API_KEY") or None
+
+
+def _max_turns() -> int:
+    try:
+        return min(max(int(os.getenv("AQUILA_MAX_TURNS", "12")), 2), 30)
+    except ValueError:
+        return 12
 
 
 async def run_aquila_workflow(
@@ -96,8 +112,8 @@ async def run_aquila_workflow(
     if route.primary == "aquila" and settings.aquila_provider == "mock":
         return AquilaRunOutput(
             message=(
-                "Aquila is running in mock mode. Provider routing is active, but a live model key must be "
-                "mounted into the API runtime before model execution can start."
+                "Aquila is running in mock mode. Provider routing is active, but the live server runtime "
+                "must expose OPENAI_API_KEY before model execution can start."
             ),
             provider_alias="aquila",
             provider="mock",
@@ -135,13 +151,14 @@ async def run_aquila_workflow(
             status="unavailable",
         )
 
-    key = _openai_key(settings)
+    key = _openai_key()
+    model = _aquila_model(settings) if route.primary == "aquila" else _openai_model()
     if not key:
         return AquilaRunOutput(
             message="OpenAI is selected but OPENAI_API_KEY is not available to the API runtime.",
             provider_alias=route.primary,
             provider="openai",
-            model=settings.openai_default_model,
+            model=model,
             checkpoint_id=None,
             git_diff="",
             notices=("Mount the key as a server-side secret; never send it from the browser.",),
@@ -150,7 +167,6 @@ async def run_aquila_workflow(
 
     set_default_openai_key(key, use_for_tracing=True)
 
-    model = settings.aquila_model if route.primary == "aquila" else settings.openai_default_model
     context = AquilaContext(
         workspace_id=workspace_id,
         workspace_service_url=settings.workspace_service_url,
@@ -168,7 +184,7 @@ async def run_aquila_workflow(
     specialist_tools = []
     if route.primary == "aquila" and "chatgpt" in route.specialists and provider_is_configured("chatgpt", settings):
         specialist_tools.append(
-            _chatgpt_specialist(settings.openai_default_model).as_tool(
+            _chatgpt_specialist(_openai_model()).as_tool(
                 tool_name="consult_chatgpt",
                 tool_description=(
                     "Ask the ChatGPT specialist for a bounded second opinion on architecture, code, UI, "
@@ -204,7 +220,7 @@ async def run_aquila_workflow(
         agent,
         input=prompt + routing_context,
         context=context,
-        max_turns=settings.aquila_max_turns,
+        max_turns=_max_turns(),
         run_config=RunConfig(trace_include_sensitive_data=False),
     )
 
