@@ -9,8 +9,8 @@ settings = get_settings()
 
 app = FastAPI(
     title=f"{settings.app_name} API",
-    version="0.1.1",
-    description="Aquila orchestration bootstrap for Inzozi Code",
+    version="0.1.3",
+    description="Aquila provider routing and guarded software engineering runtime for Inzozi Code",
 )
 
 app.add_middleware(
@@ -28,4 +28,4 @@ app.include_router(workspace_router)
 
 @app.get("/")
 def root() -> dict:
-    return {"name": settings.app_name, "version": "0.1.1", "agent": "Aquila"}
+    return {"name": settings.app_name, "version": "0.1.3", "agent": "Aquila"}
