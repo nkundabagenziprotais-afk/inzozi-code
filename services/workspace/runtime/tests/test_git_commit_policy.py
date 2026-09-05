@@ -40,8 +40,20 @@ def test_multiline_commit_message_is_rejected() -> None:
 
 
 def test_internal_review_recipes_do_not_invoke_shell() -> None:
-    for action in ("git_intent_add", "git_stage_all", "git_diff_review", "git_diff_check", "git_head"):
+    for action in (
+        "git_intent_add",
+        "git_stage_all",
+        "git_write_tree",
+        "git_unstage_all",
+        "git_diff_review",
+        "git_diff_check",
+        "git_head",
+    ):
         recipe = recipe_for(action)
         assert recipe.argv[0] == "git"
         assert "sh" not in recipe.argv
         assert "bash" not in recipe.argv
+
+
+def test_unstage_recipe_does_not_discard_working_tree_changes() -> None:
+    assert recipe_for("git_unstage_all").argv == ("git", "reset", "--mixed", "HEAD")
