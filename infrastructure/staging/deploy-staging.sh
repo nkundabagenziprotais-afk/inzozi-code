@@ -4,6 +4,7 @@ set -euo pipefail
 APP_ROOT="${APP_ROOT:-/srv/inzozi-code/application}"
 ENV_FILE="${ENV_FILE:-/srv/inzozi-code/.env.staging}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/health}"
+STAGING_COMPOSE="${APP_ROOT}/infrastructure/staging/docker-compose.staging.yml"
 
 if [[ ! -d "${APP_ROOT}/.git" ]]; then
   echo "Expected a Git checkout at ${APP_ROOT}." >&2
@@ -20,6 +21,11 @@ if [[ "$(stat -c '%a' "${ENV_FILE}")" != "600" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${STAGING_COMPOSE}" ]]; then
+  echo "Missing staging Compose override: ${STAGING_COMPOSE}" >&2
+  exit 1
+fi
+
 cd "${APP_ROOT}"
 
 if [[ -n "$(git status --porcelain)" ]]; then
@@ -30,15 +36,19 @@ fi
 
 COMMIT_SHA="$(git rev-parse HEAD)"
 BRANCH_NAME="$(git branch --show-current || true)"
+COMPOSE=(docker compose --env-file "${ENV_FILE}" -f docker-compose.yml -f "${STAGING_COMPOSE}")
 
 echo "Deploying Inzozi Code staging"
 echo "Branch: ${BRANCH_NAME:-detached}"
 echo "Commit: ${COMMIT_SHA}"
 
-# Build first. If a build fails, the currently running stack is left untouched.
-docker compose --env-file "${ENV_FILE}" build --pull
+# Validate configuration before build/start. Secrets are supplied by the untracked server env file.
+"${COMPOSE[@]}" config --quiet
 
-docker compose --env-file "${ENV_FILE}" up -d --remove-orphans
+# Build first. If a build fails, the currently running stack is left untouched.
+"${COMPOSE[@]}" build --pull
+
+"${COMPOSE[@]}" up -d --remove-orphans
 
 healthy=0
 for _ in $(seq 1 30); do
@@ -51,11 +61,11 @@ done
 
 if [[ "${healthy}" -ne 1 ]]; then
   echo "Staging health check failed: ${HEALTH_URL}" >&2
-  docker compose --env-file "${ENV_FILE}" ps >&2
-  docker compose --env-file "${ENV_FILE}" logs --tail=120 api nginx >&2 || true
+  "${COMPOSE[@]}" ps >&2
+  "${COMPOSE[@]}" logs --tail=120 api nginx >&2 || true
   exit 1
 fi
 
 echo "Health check passed: ${HEALTH_URL}"
-docker compose --env-file "${ENV_FILE}" ps
+"${COMPOSE[@]}" ps
 printf 'deployed_commit=%s\n' "${COMMIT_SHA}"
