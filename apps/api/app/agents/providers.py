@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 import re
 from typing import Iterable
 
@@ -136,8 +137,8 @@ def resolve_provider_route(text: str) -> ProviderRoute:
     return ProviderRoute(primary="aquila", requested=requested, specialists=specialists, unknown_mentions=unknown)
 
 
-def _has_openai_key(settings: Settings) -> bool:
-    return bool(settings.openai_api_key and settings.openai_api_key.get_secret_value())
+def _has_openai_key() -> bool:
+    return bool(os.getenv("OPENAI_API_KEY"))
 
 
 def provider_is_configured(alias: str, settings: Settings | None = None) -> bool:
@@ -148,16 +149,21 @@ def provider_is_configured(alias: str, settings: Settings | None = None) -> bool
     if alias == "aquila" and settings.aquila_provider == "mock":
         return True
     if definition.provider == "openai":
-        return _has_openai_key(settings)
+        return _has_openai_key()
     return False
+
+
+def _openai_model() -> str:
+    return os.getenv("OPENAI_DEFAULT_MODEL", "gpt-5.6")
 
 
 def provider_payload(definition: ProviderDefinition, settings: Settings | None = None) -> dict:
     settings = settings or get_settings()
     if definition.alias == "aquila":
-        model = settings.aquila_model
+        configured_model = os.getenv("AQUILA_MODEL", settings.aquila_model)
+        model = _openai_model() if configured_model == "mock-v0" and settings.aquila_provider != "mock" else configured_model
     elif definition.provider == "openai":
-        model = settings.openai_default_model
+        model = _openai_model()
     else:
         model = None
     return {
