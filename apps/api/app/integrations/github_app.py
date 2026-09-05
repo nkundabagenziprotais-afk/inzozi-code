@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 import time
 
@@ -84,7 +85,13 @@ def create_app_jwt() -> str:
     return jwt.encode(payload, _private_key(), algorithm="RS256")
 
 
-async def create_installation_token(installation_id: int, repository_url: str) -> str:
+async def create_installation_token(
+    installation_id: int,
+    repository_url: str,
+    *,
+    contents_permission: Literal["read", "write"] = "read",
+) -> str:
+    """Mint a short-lived, repository-scoped token with the minimum requested Contents permission."""
     repository_name = repository_name_from_url(repository_url)
     app_jwt = create_app_jwt()
     headers = {
@@ -95,7 +102,7 @@ async def create_installation_token(installation_id: int, repository_url: str) -
     }
     payload = {
         "repositories": [repository_name],
-        "permissions": {"contents": "read"},
+        "permissions": {"contents": contents_permission},
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
