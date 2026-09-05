@@ -143,6 +143,25 @@ async def _review_snapshot(workspace_id: str, *, include_intent_add: bool = Fals
     }
 
 
+async def _stage_tree_hash(workspace_id: str) -> str:
+    stage = await _action(workspace_id, "git_stage_all")
+    if stage.get("exit_code") != 0:
+        raise HTTPException(status_code=409, detail=_action_output(stage) or "Unable to stage reviewed changes")
+    tree = await _action(workspace_id, "git_write_tree")
+    tree_hash = _action_output(tree).strip()
+    if tree.get("exit_code") != 0 or not re.fullmatch(r"[0-9a-f]{40,64}", tree_hash):
+        await _action(workspace_id, "git_unstage_all")
+        raise HTTPException(status_code=409, detail="Unable to calculate reviewed Git tree")
+    return tree_hash
+
+
+async def _unstage_best_effort(workspace_id: str) -> None:
+    try:
+        await _action(workspace_id, "git_unstage_all")
+    except HTTPException:
+        pass
+
+
 @router.get("/runtime")
 async def runtime_status() -> dict:
     payload = await _request("GET", "/health") or {"status": "unknown"}
@@ -254,17 +273,26 @@ async def prepare_git_commit(workspace_id: str, request: Request) -> dict:
 
     snapshot = await _review_snapshot(workspace_id, include_intent_add=True)
     if snapshot["protected_branch"]:
+        await _unstage_best_effort(workspace_id)
         raise HTTPException(status_code=409, detail="Create a feature/fix/ui/hotfix/deploy branch before committing")
     if not snapshot["dirty"]:
+        await _unstage_best_effort(workspace_id)
         raise HTTPException(status_code=409, detail="There are no working-tree changes to commit")
 
     blocked = [path for path in snapshot["changed_paths"] if _secret_bearing_path(path)]
     if blocked:
+        await _unstage_best_effort(workspace_id)
         raise HTTPException(status_code=409, detail=f"Commit blocked because sensitive paths changed: {', '.join(blocked[:5])}")
 
     diff_check = await _action(workspace_id, "git_diff_check")
     if diff_check.get("exit_code") != 0:
+        await _unstage_best_effort(workspace_id)
         raise HTTPException(status_code=409, detail=_action_output(diff_check) or "Git diff validation failed")
+
+    tree_hash = await _stage_tree_hash(workspace_id)
+    unstage = await _action(workspace_id, "git_unstage_all")
+    if unstage.get("exit_code") != 0:
+        raise HTTPException(status_code=409, detail="Unable to restore the workspace index after commit preparation")
 
     approval_id = uuid.uuid4().hex
     now = datetime.now(timezone.utc)
@@ -275,6 +303,7 @@ async def prepare_git_commit(workspace_id: str, request: Request) -> dict:
         "branch": snapshot["branch"],
         "head": snapshot["head"],
         "fingerprint": snapshot["fingerprint"],
+        "tree_hash": tree_hash,
         "created_at": now,
         "expires_at": expires_at,
     }
@@ -286,6 +315,7 @@ async def prepare_git_commit(workspace_id: str, request: Request) -> dict:
         "status": snapshot["status"],
         "diff": snapshot["diff"],
         "changed_paths": snapshot["changed_paths"],
+        "tree_hash": tree_hash,
         "expires_at": expires_at.isoformat(),
         "requires_human_approval": True,
     }
@@ -308,21 +338,27 @@ async def approve_git_commit(workspace_id: str, request: Request) -> dict:
         or current["head"] != approval["head"]
         or current["fingerprint"] != approval["fingerprint"]
     ):
+        await _unstage_best_effort(workspace_id)
         COMMIT_APPROVALS.pop(approval_id, None)
         raise HTTPException(status_code=409, detail="Workspace changed after review. Prepare a new commit approval.")
 
     blocked = [path for path in current["changed_paths"] if _secret_bearing_path(path)]
     if blocked:
+        await _unstage_best_effort(workspace_id)
         COMMIT_APPROVALS.pop(approval_id, None)
         raise HTTPException(status_code=409, detail="Commit approval invalidated by a sensitive-path change")
 
-    stage = await _action(workspace_id, "git_stage_all")
-    if stage.get("exit_code") != 0:
-        raise HTTPException(status_code=409, detail=_action_output(stage) or "Unable to stage reviewed changes")
+    tree_hash = await _stage_tree_hash(workspace_id)
+    if tree_hash != approval.get("tree_hash"):
+        await _unstage_best_effort(workspace_id)
+        COMMIT_APPROVALS.pop(approval_id, None)
+        raise HTTPException(status_code=409, detail="Staged Git tree differs from the reviewed tree. Prepare a new approval.")
 
     encoded = base64.urlsafe_b64encode(approval["message"].encode("utf-8")).decode("ascii").rstrip("=")
     commit = await _action(workspace_id, f"git_commit_b64:{encoded}")
     if commit.get("exit_code") != 0:
+        await _unstage_best_effort(workspace_id)
+        COMMIT_APPROVALS.pop(approval_id, None)
         raise HTTPException(status_code=409, detail=_action_output(commit) or "Git commit failed")
 
     new_head = _action_output(await _action(workspace_id, "git_head")).strip()
@@ -331,6 +367,7 @@ async def approve_git_commit(workspace_id: str, request: Request) -> dict:
         "status": "committed",
         "branch": current["branch"],
         "commit_sha": new_head,
+        "tree_hash": tree_hash,
         "message": approval["message"],
         "pushed": False,
         "remote_write_enabled": False,
