@@ -45,6 +45,12 @@ async def tree(workspace_id: str, path: str = "") -> dict:
     return payload or {}
 
 
+@router.get("/{workspace_id}/search")
+async def search_workspace(workspace_id: str, q: str, limit: int = 80) -> dict:
+    payload = await _request("GET", f"/v1/workspaces/{workspace_id}/search", params={"q": q, "limit": limit})
+    return payload or {"results": []}
+
+
 @router.get("/{workspace_id}/files/{file_path:path}")
 async def read_file(workspace_id: str, file_path: str) -> dict:
     payload = await _request("GET", f"/v1/workspaces/{workspace_id}/files/{file_path}")
@@ -73,6 +79,29 @@ async def git_status(workspace_id: str) -> dict:
 async def git_diff(workspace_id: str) -> dict:
     payload = await _request("GET", f"/v1/workspaces/{workspace_id}/git/diff")
     return payload or {}
+
+
+@router.post("/{workspace_id}/checkpoints")
+async def create_checkpoint(workspace_id: str, request: Request) -> dict:
+    payload = await _request("POST", f"/v1/workspaces/{workspace_id}/checkpoints", json=await request.json())
+    return payload or {}
+
+
+@router.get("/{workspace_id}/checkpoints")
+async def list_checkpoints(workspace_id: str) -> dict:
+    payload = await _request("GET", f"/v1/workspaces/{workspace_id}/checkpoints")
+    return payload or {"checkpoints": []}
+
+
+@router.post("/{workspace_id}/checkpoints/{checkpoint_id}/restore")
+async def restore_checkpoint(workspace_id: str, checkpoint_id: str) -> dict:
+    payload = await _request("POST", f"/v1/workspaces/{workspace_id}/checkpoints/{checkpoint_id}/restore")
+    return payload or {}
+
+
+@router.delete("/{workspace_id}/checkpoints/{checkpoint_id}", status_code=204)
+async def delete_checkpoint(workspace_id: str, checkpoint_id: str) -> None:
+    await _request("DELETE", f"/v1/workspaces/{workspace_id}/checkpoints/{checkpoint_id}")
 
 
 @router.delete("/{workspace_id}", status_code=204)
