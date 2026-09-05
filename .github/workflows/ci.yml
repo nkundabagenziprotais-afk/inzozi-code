@@ -17,6 +17,11 @@ jobs:
         run: |
           python -m compileall apps/api/app
           python -m compileall services/workspace/runtime/app
+      - name: Test API integrations
+        working-directory: apps/api
+        run: |
+          python -m pip install -e '.[dev]'
+          pytest -q
       - name: Test workspace policy
         working-directory: services/workspace/runtime
         run: |
