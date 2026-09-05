@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from app.policy import PolicyError, recipe_for, resolve_inside
 
@@ -23,12 +23,13 @@ MAX_CHECKPOINT_BYTES = int(os.getenv("WORKSPACE_MAX_CHECKPOINT_BYTES", str(100 *
 GITHUB_HTTPS_RE = re.compile(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$")
 SEARCH_SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "vendor", "dist", "build", ".next", ".nuxt", "coverage"}
 
-app = FastAPI(title="Inzozi Code Workspace Runtime", version="0.1.3")
+app = FastAPI(title="Inzozi Code Workspace Runtime", version="0.1.4")
 
 
 class CreateWorkspaceRequest(BaseModel):
     repository_url: str
     ref: str | None = None
+    git_token: SecretStr | None = Field(default=None, repr=False)
 
 
 class RunActionRequest(BaseModel):
@@ -83,9 +84,11 @@ def _audit(workspace_id: str, event: str, details: dict) -> None:
         handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def _run(argv: tuple[str, ...] | list[str], cwd: Path, timeout: int) -> dict:
+def _run(argv: tuple[str, ...] | list[str], cwd: Path, timeout: int, extra_env: dict[str, str] | None = None) -> dict:
     env = os.environ.copy()
     env.update({"GIT_TERMINAL_PROMPT": "0", "CI": "1"})
+    if extra_env:
+        env.update(extra_env)
     try:
         completed = subprocess.run(
             list(argv),
@@ -102,6 +105,25 @@ def _run(argv: tuple[str, ...] | list[str], cwd: Path, timeout: int) -> dict:
         return {"exit_code": 124, "output": output, "timed_out": True}
     output = completed.stdout[-MAX_OUTPUT_BYTES:].decode("utf-8", errors="replace")
     return {"exit_code": completed.returncode, "output": output, "timed_out": False}
+
+
+def _git_auth_environment(root: Path, token: str) -> tuple[dict[str, str], Path]:
+    askpass = root / ".git-askpass.sh"
+    askpass.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  *Username*) printf '%s\\n' \"$INZOZI_GIT_USERNAME\" ;;\n"
+        "  *) printf '%s\\n' \"$INZOZI_GIT_TOKEN\" ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    askpass.chmod(0o700)
+    return {
+        "GIT_ASKPASS": str(askpass),
+        "GIT_ASKPASS_REQUIRE": "force",
+        "INZOZI_GIT_USERNAME": "x-access-token",
+        "INZOZI_GIT_TOKEN": token,
+    }, askpass
 
 
 def _tree_size(root: Path) -> int:
@@ -157,15 +179,33 @@ def create_workspace(request: CreateWorkspaceRequest) -> dict:
     root = WORKSPACE_ROOT / workspace_id
     repo = root / "repo"
     root.mkdir(mode=0o700)
-    clone = ["git", "clone", "--depth", "1"]
+    clone = ["git", "-c", "credential.helper=", "clone", "--depth", "1"]
     if request.ref:
         clone += ["--branch", request.ref]
     clone += [request.repository_url, str(repo)]
-    result = _run(clone, root, 180)
-    _audit(workspace_id, "workspace.clone", {"repository_url": request.repository_url, "ref": request.ref, **result})
+
+    authenticated = request.git_token is not None
+    auth_env: dict[str, str] | None = None
+    askpass: Path | None = None
+    if request.git_token is not None:
+        auth_env, askpass = _git_auth_environment(root, request.git_token.get_secret_value())
+    try:
+        result = _run(clone, root, 180, extra_env=auth_env)
+    finally:
+        if askpass is not None:
+            askpass.unlink(missing_ok=True)
+
+    _audit(
+        workspace_id,
+        "workspace.clone",
+        {"repository_url": request.repository_url, "ref": request.ref, "authenticated": authenticated, **result},
+    )
     if result["exit_code"] != 0:
         shutil.rmtree(root, ignore_errors=True)
-        raise HTTPException(status_code=502, detail="Repository clone failed. Private repositories require the planned GitHub App installation-token flow.")
+        detail = "Repository clone failed"
+        if authenticated:
+            detail += ". Confirm the GitHub App installation has access to this repository."
+        raise HTTPException(status_code=502, detail=detail)
     return {"workspace_id": workspace_id, "repository_url": request.repository_url, "ref": request.ref, "status": "ready"}
 
 
