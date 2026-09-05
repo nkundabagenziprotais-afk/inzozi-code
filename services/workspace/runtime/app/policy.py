@@ -26,6 +26,8 @@ RECIPES: dict[str, CommandRecipe] = {
     "git_log": CommandRecipe(("git", "log", "-n", "20", "--oneline", "--decorate"), 30),
     "git_intent_add": CommandRecipe(("git", "add", "-N", "."), 30),
     "git_stage_all": CommandRecipe(("git", "add", "-A"), 30),
+    "git_write_tree": CommandRecipe(("git", "write-tree"), 30),
+    "git_unstage_all": CommandRecipe(("git", "reset", "--mixed", "HEAD"), 30),
     "python_compile": CommandRecipe(("python", "-m", "compileall", "."), 120),
     "python_tests": CommandRecipe(("pytest", "-q"), 180),
     "node_build": CommandRecipe(("npm", "run", "build"), 180),
