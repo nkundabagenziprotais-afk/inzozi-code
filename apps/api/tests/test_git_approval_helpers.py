@@ -53,7 +53,15 @@ def test_safe_branch_policy_matches_project_conventions() -> None:
 
 
 def test_internal_commit_actions_are_not_public_generic_actions() -> None:
-    for action in ("git_intent_add", "git_stage_all", "git_diff_review", "git_diff_check", "git_head"):
+    for action in (
+        "git_intent_add",
+        "git_stage_all",
+        "git_write_tree",
+        "git_unstage_all",
+        "git_diff_review",
+        "git_diff_check",
+        "git_head",
+    ):
         assert action not in PUBLIC_ACTIONS
 
 
