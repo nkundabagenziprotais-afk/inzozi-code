@@ -5,7 +5,7 @@ import httpx
 
 from app.core.config import get_settings
 
-router = APIRouter(prefix="/api/v1/workspaces", tags=["workspaces"])
+router = APIRouter(prefix="/v1/workspaces", tags=["workspaces"])
 settings = get_settings()
 
 
