@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_ROOT="${APP_ROOT:-/srv/inzozi-code/application}"
+ENV_FILE="${ENV_FILE:-/srv/inzozi-code/.env.staging}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/health}"
+
+if [[ ! -d "${APP_ROOT}/.git" ]]; then
+  echo "Expected a Git checkout at ${APP_ROOT}." >&2
+  exit 1
+fi
+
+if [[ ! -f "${ENV_FILE}" ]]; then
+  echo "Missing staging environment file: ${ENV_FILE}" >&2
+  exit 1
+fi
+
+if [[ "$(stat -c '%a' "${ENV_FILE}")" != "600" ]]; then
+  echo "Refusing deployment: ${ENV_FILE} must have mode 600." >&2
+  exit 1
+fi
+
+cd "${APP_ROOT}"
+
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "Refusing deployment from a dirty Git worktree." >&2
+  git status --short
+  exit 1
+fi
+
+COMMIT_SHA="$(git rev-parse HEAD)"
+BRANCH_NAME="$(git branch --show-current || true)"
+
+echo "Deploying Inzozi Code staging"
+echo "Branch: ${BRANCH_NAME:-detached}"
+echo "Commit: ${COMMIT_SHA}"
+
+# Build first. If a build fails, the currently running stack is left untouched.
+docker compose --env-file "${ENV_FILE}" build --pull
+
+docker compose --env-file "${ENV_FILE}" up -d --remove-orphans
+
+healthy=0
+for _ in $(seq 1 30); do
+  if curl --fail --silent --show-error "${HEALTH_URL}" >/dev/null; then
+    healthy=1
+    break
+  fi
+  sleep 2
+done
+
+if [[ "${healthy}" -ne 1 ]]; then
+  echo "Staging health check failed: ${HEALTH_URL}" >&2
+  docker compose --env-file "${ENV_FILE}" ps >&2
+  docker compose --env-file "${ENV_FILE}" logs --tail=120 api nginx >&2 || true
+  exit 1
+fi
+
+echo "Health check passed: ${HEALTH_URL}"
+docker compose --env-file "${ENV_FILE}" ps
+printf 'deployed_commit=%s\n' "${COMMIT_SHA}"
