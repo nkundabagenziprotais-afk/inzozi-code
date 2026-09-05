@@ -19,6 +19,7 @@ services:
       REDIS_URL: ${REDIS_URL}
       AQUILA_PROVIDER: ${AQUILA_PROVIDER:-mock}
       AQUILA_MODEL: ${AQUILA_MODEL:-mock-v0}
+      WORKSPACE_SERVICE_URL: ${WORKSPACE_SERVICE_URL:-http://workspace:8100}
     ports:
       - "8000:8000"
     depends_on:
@@ -26,6 +27,26 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      workspace:
+        condition: service_healthy
+    networks:
+      - inzozi
+
+  workspace:
+    build:
+      context: ./services/workspace/runtime
+    restart: unless-stopped
+    environment:
+      WORKSPACE_ROOT: /workspaces
+      WORKSPACE_MAX_FILE_BYTES: ${WORKSPACE_MAX_FILE_BYTES:-1048576}
+      WORKSPACE_MAX_OUTPUT_BYTES: ${WORKSPACE_MAX_OUTPUT_BYTES:-65536}
+    volumes:
+      - workspace_data:/workspaces
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     networks:
       - inzozi
 
@@ -71,6 +92,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  workspace_data:
 
 networks:
   inzozi:
