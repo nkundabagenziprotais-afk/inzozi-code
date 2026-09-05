@@ -1,7 +1,7 @@
 import Editor from '@monaco-editor/react'
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 
-type Mode = 'ask' | 'plan' | 'build' | 'debug' | 'review' | 'deploy'
+type Mode = 'ask' | 'plan' | 'design' | 'build' | 'debug' | 'review' | 'deploy'
 type BottomTab = 'terminal' | 'status' | 'diff'
 type TreeEntry = { name: string; type: 'directory' | 'file' }
 type FilePayload = { path: string; content: string; sha256: string }
@@ -18,6 +18,12 @@ type ProviderItem = {
   model?: string | null
   capabilities: string[]
 }
+type ProjectPolicy = {
+  primary_provider: string
+  design_provider: string
+  review_provider: string
+  max_specialists: number
+}
 type AgentRun = {
   status: string
   provider_alias: string
@@ -32,6 +38,13 @@ type AgentRun = {
   git_diff?: string
 }
 type ApiError = { detail?: string }
+
+const DEFAULT_PROJECT_POLICY: ProjectPolicy = {
+  primary_provider: 'aquila',
+  design_provider: 'aquila',
+  review_provider: 'chatgpt',
+  max_specialists: 2,
+}
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -75,12 +88,28 @@ function repoLabel(repositoryUrl: string) {
   return repositoryUrl.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '')
 }
 
+function projectPolicyKey(repositoryUrl: string) {
+  return `inzozi-code:ai-policy:${repositoryUrl.trim().toLowerCase().replace(/\.git$/, '')}`
+}
+
+function loadProjectPolicy(repositoryUrl: string): ProjectPolicy {
+  if (!repositoryUrl || typeof window === 'undefined') return DEFAULT_PROJECT_POLICY
+  try {
+    const stored = window.localStorage.getItem(projectPolicyKey(repositoryUrl))
+    if (!stored) return DEFAULT_PROJECT_POLICY
+    return { ...DEFAULT_PROJECT_POLICY, ...(JSON.parse(stored) as Partial<ProjectPolicy>) }
+  } catch {
+    return DEFAULT_PROJECT_POLICY
+  }
+}
+
 export default function App() {
   const [mode, setMode] = useState<Mode>('plan')
   const [prompt, setPrompt] = useState('Review this project and propose the safest implementation plan.')
   const [agentMessage, setAgentMessage] = useState('Connect a repository to give Aquila a real workspace context.')
   const [agentRoute, setAgentRoute] = useState('@aquila · safe mode')
   const [providers, setProviders] = useState<ProviderItem[]>([])
+  const [projectPolicy, setProjectPolicy] = useState<ProjectPolicy>(DEFAULT_PROJECT_POLICY)
 
   const [repositoryUrl, setRepositoryUrl] = useState('')
   const [repositoryRef, setRepositoryRef] = useState('')
@@ -136,6 +165,7 @@ export default function App() {
         body: JSON.stringify({ repository_url: repositoryUrl.trim(), ref: repositoryRef.trim() || null }),
       })
       setWorkspaceId(payload.workspace_id)
+      setProjectPolicy(loadProjectPolicy(repositoryUrl.trim()))
       await loadTree(payload.workspace_id)
       await refreshGit(payload.workspace_id)
       setWorkspaceMessage('Workspace ready. Select a file or ask Aquila to inspect the repository.')
@@ -235,6 +265,16 @@ export default function App() {
     setPrompt((current) => current.includes(mention) ? current : `${mention} ${current}`.trim())
   }
 
+  function updateProjectPolicy(field: keyof ProjectPolicy, value: string | number) {
+    setProjectPolicy((current) => {
+      const next = { ...current, [field]: value } as ProjectPolicy
+      if (repositoryUrl.trim() && typeof window !== 'undefined') {
+        window.localStorage.setItem(projectPolicyKey(repositoryUrl), JSON.stringify(next))
+      }
+      return next
+    })
+  }
+
   async function submitAgent(event: FormEvent) {
     event.preventDefault()
     if (!prompt.trim()) return
@@ -249,6 +289,7 @@ export default function App() {
           prompt,
           project_name: projectName,
           workspace_id: workspaceId || null,
+          project_policy: projectPolicy,
         }),
       })
       const noticeText = data.notices.length ? `\n\n${data.notices.join('\n')}` : ''
@@ -327,7 +368,7 @@ export default function App() {
             <div className="empty-editor">
               <span className="empty-mark">IC</span>
               <h2>{workspaceId ? 'Repository connected' : 'Build with Aquila'}</h2>
-              <p>{workspaceId ? 'Select a file from Explorer or ask Aquila to inspect, plan, review, build, or debug the repository.' : 'Connect a repository to begin the real code-review-edit-test loop.'}</p>
+              <p>{workspaceId ? 'Select a file or ask Aquila to plan, design, review, build, or debug the repository.' : 'Connect a repository to begin the real code-review-edit-test loop.'}</p>
               <small>{workspaceMessage}</small>
             </div>
           )}
@@ -336,7 +377,7 @@ export default function App() {
         <aside className="aquila panel">
           <div className="aquila-heading"><div><span className="spark">✦</span><strong>Aquila</strong></div><small>{agentRoute}</small></div>
           <div className="modes">
-            {(['ask','plan','build','debug','review','deploy'] as Mode[]).map((item) => <button key={item} onClick={() => setMode(item)} className={mode === item ? 'active' : ''}>{item}</button>)}
+            {(['ask','plan','design','build','debug','review','deploy'] as Mode[]).map((item) => <button key={item} onClick={() => setMode(item)} className={mode === item ? 'active' : ''}>{item}</button>)}
           </div>
           <div className="provider-strip" aria-label="AI providers and external agents">
             <span className="provider-label">REFERENCE</span>
@@ -354,10 +395,19 @@ export default function App() {
               ))}
             </div>
           </div>
+          <details className="routing-policy">
+            <summary>Project AI roles</summary>
+            <div className="routing-policy-grid">
+              <label>Primary<select value={projectPolicy.primary_provider} onChange={(e) => updateProjectPolicy('primary_provider', e.target.value)}>{providers.map((provider) => <option key={`primary-${provider.alias}`} value={provider.alias}>@{provider.alias}</option>)}</select></label>
+              <label>Design<select value={projectPolicy.design_provider} onChange={(e) => updateProjectPolicy('design_provider', e.target.value)}>{providers.map((provider) => <option key={`design-${provider.alias}`} value={provider.alias}>@{provider.alias}</option>)}</select></label>
+              <label>Reviewer<select value={projectPolicy.review_provider} onChange={(e) => updateProjectPolicy('review_provider', e.target.value)}>{providers.map((provider) => <option key={`review-${provider.alias}`} value={provider.alias}>@{provider.alias}</option>)}</select></label>
+            </div>
+            <small>Explicit @mentions override these defaults. Alpha preferences are stored locally per repository; no credentials are stored here.</small>
+          </details>
           <div className="agent-output"><span className="output-label">AQUILA / {mode.toUpperCase()}</span><p>{agentMessage}</p><div className="context-card"><span>CONTEXT</span><strong>{workspaceId ? projectName : 'No workspace'}</strong><small>{selectedPath || 'No file selected'}</small></div></div>
           <form onSubmit={submitAgent} className="prompt-box">
             <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="Aquila prompt" placeholder="Try: @chatgpt review this API, or @lovable propose a UI direction" />
-            <div><span>{mode === 'deploy' ? 'Plan only · approval required' : workspaceId ? 'Guarded workspace' : 'No repository tools'}</span><button disabled={busy}>{busy ? 'Running…' : 'Run →'}</button></div>
+            <div><span>{mode === 'deploy' ? 'Plan only · approval required' : mode === 'design' ? 'Read-only design review' : workspaceId ? 'Guarded workspace' : 'No repository tools'}</span><button disabled={busy}>{busy ? 'Running…' : 'Run →'}</button></div>
           </form>
         </aside>
       </section>
