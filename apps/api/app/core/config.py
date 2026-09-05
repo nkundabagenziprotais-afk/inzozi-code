@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     aquila_provider: str = "mock"
     aquila_model: str = "mock-v0"
     workspace_service_url: str = "http://workspace:8100"
+    github_app_id: str = ""
+    github_app_private_key: str = ""
+    github_app_private_key_path: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
