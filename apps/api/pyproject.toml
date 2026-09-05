@@ -1,6 +1,6 @@
 [project]
 name = "inzozi-code-api"
-version = "0.1.1"
+version = "0.1.2"
 description = "Inzozi Code API and Aquila orchestration bootstrap"
 requires-python = ">=3.12"
 dependencies = [
@@ -8,6 +8,7 @@ dependencies = [
   "uvicorn[standard]>=0.35,<1",
   "pydantic-settings>=2.10,<3",
   "httpx>=0.28,<1",
+  "PyJWT[crypto]>=2.10,<3",
 ]
 
 [project.optional-dependencies]
