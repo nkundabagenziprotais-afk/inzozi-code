@@ -1,12 +1,13 @@
 [project]
 name = "inzozi-code-api"
-version = "0.1.0"
+version = "0.1.1"
 description = "Inzozi Code API and Aquila orchestration bootstrap"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.116,<1",
   "uvicorn[standard]>=0.35,<1",
   "pydantic-settings>=2.10,<3",
+  "httpx>=0.28,<1",
 ]
 
 [project.optional-dependencies]
