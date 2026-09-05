@@ -118,8 +118,6 @@ async def _review_snapshot(workspace_id: str, *, include_intent_add: bool = Fals
         if intent.get("exit_code") != 0:
             raise HTTPException(status_code=409, detail="Unable to prepare new files for review")
 
-    branch_payload, head_payload, status_payload, diff_payload = await httpx.AsyncClient, None, None, None
-    # The assignments above are replaced immediately; this line keeps no client or network resource open.
     branch_payload = await _action(workspace_id, "git_branch")
     head_payload = await _action(workspace_id, "git_head")
     status_payload = await _action(workspace_id, "git_status")
@@ -132,6 +130,7 @@ async def _review_snapshot(workspace_id: str, *, include_intent_add: bool = Fals
     if not branch or not head:
         raise HTTPException(status_code=409, detail="Workspace Git state is incomplete")
 
+    changed_paths = _changed_paths(status)
     return {
         "branch": branch,
         "head": head,
@@ -139,8 +138,8 @@ async def _review_snapshot(workspace_id: str, *, include_intent_add: bool = Fals
         "diff": diff,
         "fingerprint": _fingerprint(branch, head, status, diff),
         "protected_branch": branch in PROTECTED_BRANCHES,
-        "changed_paths": _changed_paths(status),
-        "dirty": bool(_changed_paths(status)),
+        "changed_paths": changed_paths,
+        "dirty": bool(changed_paths),
     }
 
 
