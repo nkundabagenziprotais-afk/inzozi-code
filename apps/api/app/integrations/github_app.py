@@ -16,15 +16,21 @@ class GitHubAppError(RuntimeError):
     pass
 
 
-def repository_name_from_url(repository_url: str) -> str:
+def repository_coordinates_from_url(repository_url: str) -> tuple[str, str]:
     parsed = urlparse(repository_url)
     if parsed.scheme != "https" or parsed.netloc != "github.com":
         raise GitHubAppError("Only GitHub HTTPS repository URLs are supported")
     parts = [part for part in parsed.path.strip("/").split("/") if part]
     if len(parts) != 2:
         raise GitHubAppError("Repository URL must be in https://github.com/owner/repo form")
-    name = parts[1]
-    return name[:-4] if name.endswith(".git") else name
+    owner, name = parts
+    if name.endswith(".git"):
+        name = name[:-4]
+    return owner, name
+
+
+def repository_name_from_url(repository_url: str) -> str:
+    return repository_coordinates_from_url(repository_url)[1]
 
 
 def _private_key() -> str:
@@ -41,7 +47,28 @@ def _private_key() -> str:
 
 def github_app_configured() -> bool:
     settings = get_settings()
-    return bool(settings.github_app_id and (settings.github_app_private_key or settings.github_app_private_key_path))
+    return bool(
+        settings.github_app_id
+        and settings.github_app_owner
+        and settings.github_app_default_installation_id
+        and (settings.github_app_private_key or settings.github_app_private_key_path)
+    )
+
+
+def default_installation_for(repository_url: str) -> int | None:
+    settings = get_settings()
+    if not github_app_configured():
+        return None
+    owner, _ = repository_coordinates_from_url(repository_url)
+    if owner.casefold() != settings.github_app_owner.casefold():
+        return None
+    try:
+        installation_id = int(settings.github_app_default_installation_id)
+    except ValueError as exc:
+        raise GitHubAppError("Configured GitHub App installation ID is invalid") from exc
+    if installation_id <= 0:
+        raise GitHubAppError("Configured GitHub App installation ID is invalid")
+    return installation_id
 
 
 def create_app_jwt() -> str:
