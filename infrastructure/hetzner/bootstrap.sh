@@ -36,7 +36,12 @@ scp "${SSH_ARGS[@]}" "${STAGING_BOOTSTRAP}" "${TARGET}:/tmp/inzozi-bootstrap-hos
 ssh "${SSH_ARGS[@]}" "${TARGET}" \
   'sudo bash /tmp/inzozi-bootstrap-host.sh && rm -f /tmp/inzozi-bootstrap-host.sh'
 
+# Docker is installed by the provider-neutral bootstrap, so add the staging
+# operator only after the docker group exists. A fresh SSH session below picks
+# up the new supplementary group membership.
+ssh "${SSH_ARGS[@]}" "${TARGET}" \
+  "sudo usermod -aG docker '${ADMIN_USER}'"
+
 ssh "${SSH_ARGS[@]}" "${TARGET}" \
   'test -f /etc/inzozi-code-staging && docker --version && docker compose version && sudo nginx -t'
-
 echo "Hetzner staging base host verified: ${TARGET}"
