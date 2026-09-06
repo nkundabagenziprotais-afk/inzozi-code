@@ -76,16 +76,77 @@ def _mount_status() -> dict[str, str]:
     return {"filesystem": filesystem, "options": options}
 
 
-def _run_xfs(command: str) -> None:
+def _run(command: list[str], error_message: str, *, timeout: int = 30) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
-        ["xfs_quota", "-x", "-c", command, str(ROOT)],
+        command,
         check=False,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=timeout,
     )
     if result.returncode != 0:
-        raise RuntimeError("XFS project quota operation failed")
+        detail = (result.stderr or result.stdout).strip()
+        if detail:
+            raise RuntimeError(f"{error_message}: {detail}")
+        raise RuntimeError(error_message)
+    return result
+
+
+def _parse_project_id(output: str) -> int:
+    match = re.search(r"projid\s*=\s*(\d+)", output)
+    if not match:
+        raise RuntimeError("Unable to verify XFS project id")
+    return int(match.group(1))
+
+
+def _project_inherit_enabled(output: str) -> bool:
+    for line in output.splitlines():
+        fields = line.split(maxsplit=1)
+        if fields and "P" in fields[0]:
+            return True
+    return False
+
+
+def _set_project(path: Path, project_id: int) -> None:
+    _run(
+        ["xfs_io", "-c", f"chproj {project_id}", str(path)],
+        "Unable to assign XFS project id",
+    )
+    _run(
+        ["xfs_io", "-c", "chattr +P", str(path)],
+        "Unable to enable XFS project inheritance",
+    )
+    project = _run(
+        ["xfs_io", "-c", "lsproj", str(path)],
+        "Unable to verify XFS project id",
+    )
+    if _parse_project_id(project.stdout) != project_id:
+        raise RuntimeError("XFS project id verification failed")
+    attrs = _run(
+        ["xfs_io", "-c", "lsattr", str(path)],
+        "Unable to verify XFS project inheritance",
+    )
+    if not _project_inherit_enabled(attrs.stdout):
+        raise RuntimeError("XFS project inheritance verification failed")
+
+
+def _set_limit(project_id: int, limit_bytes: int) -> None:
+    limit_kib = (limit_bytes + 1023) // 1024
+    _run(
+        [
+            "setquota",
+            "-P",
+            "-F",
+            "xfs",
+            str(project_id),
+            str(limit_kib),
+            str(limit_kib),
+            "0",
+            "0",
+            str(ROOT),
+        ],
+        "Unable to apply XFS project hard quota",
+    )
 
 
 def _candidate_project_ids(workspace_id: str):
@@ -119,7 +180,10 @@ def _allocate_project_id(workspace_id: str) -> int:
 
 def _clear_limit(project_id: int) -> None:
     try:
-        _run_xfs(f"limit -p bsoft=0 bhard=0 {project_id}")
+        _run(
+            ["setquota", "-P", "-F", "xfs", str(project_id), "0", "0", "0", "0", str(ROOT)],
+            "Unable to clear XFS project quota",
+        )
     except RuntimeError:
         pass
 
@@ -152,10 +216,9 @@ def _setup(workspace_id: str, limit_bytes: int) -> dict:
 
         project_id = _allocate_project_id(workspace_id)
         path.mkdir(mode=0o700)
-        limit_kib = (limit_bytes + 1023) // 1024
         try:
-            _run_xfs(f"project -s -p {path} {project_id}")
-            _run_xfs(f"limit -p bsoft={limit_kib}k bhard={limit_kib}k {project_id}")
+            _set_project(path, project_id)
+            _set_limit(project_id, limit_bytes)
             marker.write_text(f"{project_id}\n", encoding="ascii")
             os.chmod(marker, 0o600)
         except Exception:
@@ -217,53 +280,37 @@ def _probe() -> dict:
     _mount_status()
     workspace_id = secrets.token_hex(16)
     limit_bytes = 1024 * 1024
-    original_root_mode = ROOT.stat().st_mode & 0o7777
     _setup(workspace_id, limit_bytes)
     path = _workspace_path(workspace_id)
+    probe_path = path / "quota-probe.bin"
     try:
-        os.chown(path, 65534, 65534)
-        # The probe writer needs traverse-only access to the quota root. Preserve the
-        # root-only registry (0700) and restore the mount-point mode immediately after.
-        os.chmod(ROOT, original_root_mode | 0o001)
-        script = (
-            "import errno, os, sys\n"
-            f"path={str(path / 'quota-probe.bin')!r}\n"
-            "try:\n"
-            "    with open(path, 'wb') as handle:\n"
-            "        handle.write(b'0' * (2 * 1024 * 1024))\n"
-            "        handle.flush()\n"
-            "        os.fsync(handle.fileno())\n"
-            "except OSError as exc:\n"
-            f"    raise SystemExit(0 if exc.errno == {PROJECT_QUOTA_FAILURE_ERRNO} else 3)\n"
-            "raise SystemExit(2)\n"
+        fd = os.open(probe_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            remaining = 2 * 1024 * 1024
+            chunk = b"0" * 65536
+            while remaining:
+                written = os.write(fd, chunk[: min(len(chunk), remaining)])
+                if written <= 0:
+                    raise RuntimeError("XFS project hard quota probe write made no progress")
+                remaining -= written
+            os.fsync(fd)
+        except OSError as exc:
+            if exc.errno != PROJECT_QUOTA_FAILURE_ERRNO:
+                raise RuntimeError(
+                    f"XFS project hard quota probe failed with unexpected errno {exc.errno}"
+                ) from exc
+            return {
+                "status": "ok",
+                "hard_limit_enforced": True,
+                "failure_errno": PROJECT_QUOTA_FAILURE_ERRNO_NAME,
+                "probe_limit_bytes": limit_bytes,
+            }
+        finally:
+            os.close(fd)
+        raise RuntimeError(
+            f"XFS project hard quota probe did not fail with {PROJECT_QUOTA_FAILURE_ERRNO_NAME}"
         )
-        result = subprocess.run(
-            [
-                "setpriv",
-                "--reuid=65534",
-                "--regid=65534",
-                "--clear-groups",
-                "python",
-                "-c",
-                script,
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"XFS project hard quota probe did not fail with {PROJECT_QUOTA_FAILURE_ERRNO_NAME}"
-            )
-        return {
-            "status": "ok",
-            "hard_limit_enforced": True,
-            "failure_errno": PROJECT_QUOTA_FAILURE_ERRNO_NAME,
-            "probe_limit_bytes": limit_bytes,
-        }
     finally:
-        os.chmod(ROOT, original_root_mode)
         _destroy(workspace_id)
 
 
