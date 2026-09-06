@@ -13,6 +13,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: '1.16.1'
+          terraform_wrapper: false
       - name: Compile Python sources
         run: |
           python -m compileall apps/api/app
@@ -31,6 +35,15 @@ jobs:
         run: |
           bash -n infrastructure/staging/bootstrap-host.sh
           bash -n infrastructure/staging/deploy-staging.sh
+          bash -n infrastructure/hetzner/up.sh
+          bash -n infrastructure/hetzner/bootstrap.sh
+          bash -n infrastructure/hetzner/down.sh
+      - name: Validate Hetzner Terraform
+        working-directory: infrastructure/hetzner
+        run: |
+          terraform fmt -check
+          terraform init -backend=false -input=false
+          terraform validate
       - name: Validate staging Compose configuration
         env:
           DATABASE_URL: postgresql://inzozi_code:test@postgres:5432/inzozi_code
