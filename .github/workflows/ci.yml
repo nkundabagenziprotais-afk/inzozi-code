@@ -21,6 +21,7 @@ jobs:
         run: |
           python -m compileall apps/api/app
           python -m compileall services/workspace/runtime/app
+          python -m compileall services/workspace/manager/app
       - name: Test API integrations
         working-directory: apps/api
         run: |
@@ -31,6 +32,11 @@ jobs:
         run: |
           python -m pip install -e '.[dev]'
           pytest -q
+      - name: Test workspace manager policy
+        working-directory: services/workspace/manager
+        run: |
+          python -m pip install -e '.[dev]'
+          pytest -q
       - name: Validate staging shell scripts
         run: |
           bash -n infrastructure/staging/bootstrap-host.sh
@@ -38,6 +44,7 @@ jobs:
           bash -n infrastructure/staging/github-app-preflight.sh
           bash -n infrastructure/staging/auth-preflight.sh
           bash -n infrastructure/staging/workspace-ownership-preflight.sh
+          bash -n infrastructure/staging/dedicated-workspace-preflight.sh
           bash -n infrastructure/hetzner/prepare-local.sh
           bash -n infrastructure/hetzner/up.sh
           bash -n infrastructure/hetzner/bootstrap.sh
@@ -66,6 +73,11 @@ jobs:
           docker compose \
             -f docker-compose.yml \
             -f infrastructure/staging/docker-compose.staging.yml \
+            config --quiet
+          docker compose \
+            -f docker-compose.yml \
+            -f infrastructure/staging/docker-compose.staging.yml \
+            --profile workspace-runtime-image \
             config --quiet
 
   web-build:
