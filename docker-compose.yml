@@ -53,10 +53,46 @@ services:
       context: ./services/workspace/manager
     restart: unless-stopped
     environment:
-      WORKSPACE_RUNTIME_IMAGE: ${WORKSPACE_RUNTIME_IMAGE:-inzozi-code-workspace-runtime:local}
       WORKSPACE_API_SERVICE_HOST: api
-      WORKSPACE_EGRESS_NETWORK: ${WORKSPACE_EGRESS_NETWORK:-inzozi-workspace-egress}
+      WORKSPACE_BROKER_URL: http://workspace-broker:8300
+      WORKSPACE_BROKER_TOKEN: ${WORKSPACE_BROKER_TOKEN:-development-only-broker-token-change-me}
       WORKSPACE_TTL_SECONDS: ${WORKSPACE_TTL_SECONDS:-28800}
+    depends_on:
+      workspace-broker:
+        condition: service_healthy
+    labels:
+      com.inzozi.code.role: workspace-manager
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=134217728
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 0.5
+    pids_limit: 128
+    sysctls:
+      net.ipv4.ip_forward: "0"
+      net.ipv6.conf.all.forwarding: "0"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - inzozi
+      - workspace-control
+
+  workspace-broker:
+    build:
+      context: ./services/workspace/broker
+    restart: unless-stopped
+    environment:
+      WORKSPACE_RUNTIME_IMAGE: ${WORKSPACE_RUNTIME_IMAGE:-inzozi-code-workspace-runtime:local}
+      WORKSPACE_MANAGER_SERVICE_HOST: workspace-manager
+      WORKSPACE_BROKER_TOKEN: ${WORKSPACE_BROKER_TOKEN:-development-only-broker-token-change-me}
+      WORKSPACE_EGRESS_NETWORK: ${WORKSPACE_EGRESS_NETWORK:-inzozi-workspace-egress}
       WORKSPACE_MAX_ACTIVE: ${WORKSPACE_MAX_ACTIVE:-8}
       WORKSPACE_DISK_LIMIT_BYTES: ${WORKSPACE_DISK_LIMIT_BYTES:-2147483648}
       WORKSPACE_RUNTIME_MEMORY_LIMIT: ${WORKSPACE_RUNTIME_MEMORY_LIMIT:-4g}
@@ -68,23 +104,28 @@ services:
       WORKSPACE_MAX_CHECKPOINT_BYTES: ${WORKSPACE_MAX_CHECKPOINT_BYTES:-104857600}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      com.inzozi.code.role: workspace-broker
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=134217728
+      - /tmp:rw,noexec,nosuid,nodev,size=67108864
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 128
     sysctls:
       net.ipv4.ip_forward: "0"
       net.ipv6.conf.all.forwarding: "0"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/health', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8300/health', timeout=3)"]
       interval: 5s
       timeout: 5s
       retries: 12
     networks:
-      - inzozi
+      - workspace-control
 
   workspace-runtime-image:
     image: ${WORKSPACE_RUNTIME_IMAGE:-inzozi-code-workspace-runtime:local}
@@ -139,3 +180,6 @@ volumes:
 networks:
   inzozi:
     driver: bridge
+  workspace-control:
+    driver: bridge
+    internal: true
