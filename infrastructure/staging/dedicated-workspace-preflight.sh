@@ -103,11 +103,11 @@ import os
 payload = json.loads(os.environ["QUOTA_PROBE"].strip().splitlines()[-1])
 assert payload["status"] == "ok"
 assert payload["hard_limit_enforced"] is True
-assert payload["failure_errno"] == "EDQUOT"
+assert payload["failure_errno"] == "ENOSPC"
 assert int(payload["probe_limit_bytes"]) == 1024 * 1024
 PY
 
-echo "XFS hard quota probe passed: a 2 MiB write was blocked by a 1 MiB project limit with EDQUOT."
+echo "XFS hard quota probe passed: a 2 MiB write was blocked by a 1 MiB project limit with ENOSPC."
 
 set +e
 docker exec "$("${COMPOSE[@]}" ps -q api)" python -c 'import socket; socket.getaddrinfo("workspace-broker", 8300)' >/dev/null 2>&1
