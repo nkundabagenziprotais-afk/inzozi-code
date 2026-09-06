@@ -45,6 +45,14 @@ def _app() -> FastAPI:
     app.add_middleware(AuthMiddleware)
     app.include_router(auth_router)
 
+    @app.post("/v1/workspaces")
+    def create_workspace() -> dict:
+        return {
+            "workspace_id": WORKSPACE_ID,
+            "repository_url": "https://github.com/example/private-repo",
+            "status": "ready",
+        }
+
     @app.get("/v1/workspaces/{workspace_id}/tree")
     def tree(workspace_id: str) -> dict:
         return {"workspace_id": workspace_id, "status": "visible"}
@@ -79,6 +87,31 @@ def test_principal_access_is_org_and_owner_scoped():
     assert principal_can_access(principal, _ownership()) is True
     assert principal_can_access(principal, _ownership(owner_email="other@inzozidigital.com")) is False
     assert principal_can_access(principal, _ownership(organization_id="other-org")) is False
+
+
+def test_successful_workspace_create_registers_authenticated_owner(monkeypatch):
+    _configure(monkeypatch, role="developer")
+    captured = {}
+
+    def register(**kwargs):
+        captured.update(kwargs)
+        return _ownership()
+
+    monkeypatch.setattr("app.security.workspace_scope.register_workspace", register)
+    monkeypatch.setattr("app.security.workspace_scope.record_workspace_audit", lambda **_kwargs: None)
+
+    with TestClient(_app()) as client:
+        _login(client)
+        response = client.post(
+            "/v1/workspaces",
+            json={"repository_url": "https://github.com/example/private-repo"},
+        )
+        assert response.status_code == 200
+        assert response.json()["workspace_id"] == WORKSPACE_ID
+        assert captured["workspace_id"] == WORKSPACE_ID
+        assert captured["repository_url"] == "https://github.com/example/private-repo"
+        assert captured["principal"].email == "developer@inzozidigital.com"
+    get_settings.cache_clear()
 
 
 def test_cross_owner_workspace_id_guess_returns_404(monkeypatch):
