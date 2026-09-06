@@ -30,7 +30,8 @@ Only the privileged workspace broker may launch the quota helper image. The help
 - mounts only the configured quota storage root;
 - uses XFS project IDs allocated under a root-only registry outside workspace-visible directories;
 - assigns the project ID directly with `xfs_io`, enables the XFS project-inherit flag, and verifies both before continuing;
-- applies/clears the project hard limit through `setquota -P -F xfs`, avoiding false-positive `xfs_quota` command success on a container bind mount;
+- applies and reads back project hard limits with the Linux `quotactl_fd` API using XFS `Q_XSETQLIM` / `Q_XGETQUOTA` commands against a file descriptor for the mounted filesystem;
+- avoids mount-table or backing-device discovery inside the helper namespace, so a bind-mounted quota root cannot produce the false-positive behavior seen with `xfs_quota` or the mountpoint-resolution failure seen with `setquota`;
 - uses only `SYS_ADMIN` and `CHOWN` inside the short-lived quota helper container;
 - is removed after every operation.
 
@@ -41,7 +42,7 @@ The long-lived workspace manager remains unprivileged and has no Docker socket.
 1. Validate the workspace ID, GitHub URL, ref, TTL, and active-workspace capacity.
 2. Ask the fixed quota helper to allocate a unique project ID.
 3. Assign that ID to the workspace root, enable project inheritance, and verify the inode reports the exact allocated project ID before any clone can begin.
-4. Apply the hard XFS project byte limit through the quota syscall tooling.
+4. Apply the hard XFS project byte limit with `quotactl_fd`, then read it back and require the exact project ID, quota type, soft limit, and hard limit.
 5. Create a Docker local bind-volume alias pointing to the broker-derived workspace directory.
 6. Create the workspace's private internal Docker network.
 7. Run the short-lived GitHub bootstrap helper against the already-quoted storage.
@@ -60,6 +61,7 @@ The staging preflight requires all of the following:
 - every active workspace has a project ID;
 - active project IDs are unique;
 - helper setup fails closed unless `xfs_io lsproj` reports the exact allocated project ID and the directory has project inheritance enabled;
+- helper setup fails closed unless `Q_XGETQUOTA` reads back the exact configured block hard limit for that project;
 - a disposable quota probe sets a 1 MiB hard project limit and verifies that a 2 MiB write fails with `ENOSPC`, which is the XFS project-quota exhaustion errno;
 - the probe directory and limit are removed afterward.
 
