@@ -112,12 +112,26 @@ sudo chown nobody:nogroup "${PROBE_DIR}"
 sudo chmod 0751 "${MOUNT_POINT}"
 
 set +e
-sudo -u nobody dd if=/dev/zero of="${PROBE_DIR}/probe.bin" bs=1M count=2 conv=fsync status=none 2>/dev/null
+sudo -u nobody python3 - "${PROBE_DIR}/probe.bin" <<'PY'
+import errno
+import os
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "wb") as handle:
+        handle.write(b"0" * (2 * 1024 * 1024))
+        handle.flush()
+        os.fsync(handle.fileno())
+except OSError as exc:
+    raise SystemExit(0 if exc.errno == errno.ENOSPC else 3)
+raise SystemExit(2)
+PY
 PROBE_RC=$?
 set -e
 
-if [[ "${PROBE_RC}" -eq 0 ]]; then
-  echo "Hard XFS project quota probe failed: a 2 MiB write exceeded a 1 MiB limit." >&2
+if [[ "${PROBE_RC}" -ne 0 ]]; then
+  echo "Hard XFS project quota probe failed: expected ENOSPC from a 2 MiB write under a 1 MiB project limit." >&2
   exit 1
 fi
 
@@ -125,5 +139,5 @@ cleanup_probe
 trap - EXIT
 
 sudo xfs_quota -x -c state "${MOUNT_POINT}" | sed -n '1,14p'
-echo "Workspace quota storage ready: XFS + prjquota + hard-limit probe passed."
+echo "Workspace quota storage ready: XFS + prjquota + ENOSPC hard-limit probe passed."
 REMOTE
