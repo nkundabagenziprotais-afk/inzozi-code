@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
 import json
@@ -17,6 +18,8 @@ LOCK_FILE = REGISTRY / ".lock"
 WORKSPACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 MIN_PROJECT_ID = 10_000
 MAX_PROJECT_ID = 2_000_000_000
+PROJECT_QUOTA_FAILURE_ERRNO = errno.ENOSPC
+PROJECT_QUOTA_FAILURE_ERRNO_NAME = "ENOSPC"
 
 
 def _emit(payload: dict) -> None:
@@ -231,7 +234,7 @@ def _probe() -> dict:
             "        handle.flush()\n"
             "        os.fsync(handle.fileno())\n"
             "except OSError as exc:\n"
-            "    raise SystemExit(0 if exc.errno == errno.EDQUOT else 3)\n"
+            f"    raise SystemExit(0 if exc.errno == {PROJECT_QUOTA_FAILURE_ERRNO} else 3)\n"
             "raise SystemExit(2)\n"
         )
         result = subprocess.run(
@@ -250,11 +253,13 @@ def _probe() -> dict:
             timeout=30,
         )
         if result.returncode != 0:
-            raise RuntimeError("XFS project hard quota probe did not fail with EDQUOT")
+            raise RuntimeError(
+                f"XFS project hard quota probe did not fail with {PROJECT_QUOTA_FAILURE_ERRNO_NAME}"
+            )
         return {
             "status": "ok",
             "hard_limit_enforced": True,
-            "failure_errno": "EDQUOT",
+            "failure_errno": PROJECT_QUOTA_FAILURE_ERRNO_NAME,
             "probe_limit_bytes": limit_bytes,
         }
     finally:
