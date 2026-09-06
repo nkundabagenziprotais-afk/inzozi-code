@@ -37,16 +37,36 @@ The Hetzner API token is read from `HCLOUD_TOKEN` in the local process environme
 1. Create a dedicated Hetzner Cloud project for Inzozi Code staging.
 2. Create a project API token with the access required to create/delete the staging resources.
 3. Install Terraform 1.16.x.
-4. Have an Ed25519 SSH key pair. Keep the private key local.
-5. Know the public CIDR from which SSH should be allowed, normally your current public IPv4 as `/32`.
+4. Have `ssh-keygen`, `curl`, and Bash available locally.
+5. Restrict SSH to your current public IPv4 as a `/32` whenever possible.
+
+## Prepare the local operator machine
+
+Run the helper from the repository root:
+
+```bash
+./infrastructure/hetzner/prepare-local.sh
+```
+
+It will:
+
+- create a dedicated Ed25519 staging key if one does not already exist;
+- preserve and reuse an existing complete key pair rather than overwrite it;
+- recommend a passphrase for the operator key;
+- detect the current public IPv4 for the SSH `/32` firewall rule;
+- print the exact non-secret Terraform environment setup;
+- never read, store, or print the Hetzner API token.
+
+The helper does not create any cloud resources and therefore starts no Hetzner compute billing.
 
 ## Environment
 
-Example shell setup (values are placeholders):
+After local preparation, set the project API token only in your own terminal or secret manager, then export the non-secret Terraform variables shown by the helper. Equivalent example values are:
 
 ```bash
 export HCLOUD_TOKEN='set-this-securely-outside-git'
-export TF_VAR_ssh_public_key="$(cat ~/.ssh/inzozi_staging_ed25519.pub)"
+export SSH_KEY_PATH="$HOME/.ssh/inzozi_code_staging_ed25519"
+export TF_VAR_ssh_public_key="$(cat "$SSH_KEY_PATH.pub")"
 export TF_VAR_ssh_source_cidrs='["203.0.113.10/32"]'
 ```
 
@@ -74,7 +94,7 @@ After creation:
 If your staging SSH key is not the default key selected by SSH:
 
 ```bash
-SSH_KEY_PATH=~/.ssh/inzozi_staging_ed25519 \
+SSH_KEY_PATH=~/.ssh/inzozi_code_staging_ed25519 \
   ./infrastructure/hetzner/bootstrap.sh
 ```
 
@@ -110,6 +130,7 @@ The intended rhythm is:
 
 ```text
 GitHub + CI
+  -> prepare local operator machine
   -> create temporary Hetzner staging
   -> bootstrap
   -> deploy reviewed commit
