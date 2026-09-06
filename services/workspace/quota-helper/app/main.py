@@ -121,6 +121,20 @@ def _clear_limit(project_id: int) -> None:
         pass
 
 
+def _reclaim_tree_for_removal(path: Path) -> None:
+    """Reclaim directory traversal without granting DAC_OVERRIDE or following symlinks."""
+    os.chown(path, 0, 0, follow_symlinks=False)
+    os.chmod(path, 0o700, follow_symlinks=False)
+    for current, dirs, _files in os.walk(path, topdown=True, followlinks=False):
+        base = Path(current)
+        for name in dirs:
+            child = base / name
+            if child.is_symlink():
+                continue
+            os.chown(child, 0, 0, follow_symlinks=False)
+            os.chmod(child, 0o700, follow_symlinks=False)
+
+
 def _setup(workspace_id: str, limit_bytes: int) -> dict:
     _mount_status()
     REGISTRY.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -176,6 +190,7 @@ def _destroy(workspace_id: str) -> dict:
         if path.is_symlink():
             raise RuntimeError("Refusing to remove a symlinked workspace quota path")
         if path.exists():
+            _reclaim_tree_for_removal(path)
             shutil.rmtree(path)
         if project_id is not None:
             _clear_limit(project_id)
