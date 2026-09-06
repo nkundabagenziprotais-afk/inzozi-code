@@ -37,39 +37,24 @@ if not ownership_table or not audit_table:
 print("Durable workspace ownership and audit registry is ready.")
 PY
 
-workspace_container="$(${COMPOSE[@]} ps -q workspace)"
-if [[ -z "${workspace_container}" ]]; then
-  echo "Workspace container is not running." >&2
-  exit 1
+manager_container="$(${COMPOSE[@]} ps -q workspace-manager)"
+if [[ -n "${manager_container}" ]]; then
+  status_json="$(docker exec "${manager_container}" python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8200/v1/isolation/status", timeout=5).read().decode())')"
+  STATUS_JSON="${status_json}" python3 - <<'PY'
+import json
+import os
+payload = json.loads(os.environ["STATUS_JSON"])
+assert payload["mode"] == "dedicated-per-workspace-containers"
+assert payload["workspace_socket_mounts"] == 0
+assert payload["runtime_egress"] == "denied"
+if payload["active_workspaces"]:
+    assert payload["dedicated_networks"] is True
+    assert payload["all_runtime_networks_internal"] is True
+PY
+  echo "Workspace ownership is paired with dedicated per-workspace execution and egress-denied runtimes."
+  echo "Workspace ownership preflight passed."
+  exit 0
 fi
 
-read_only="$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "${workspace_container}")"
-cap_drop="$(docker inspect -f '{{json .HostConfig.CapDrop}}' "${workspace_container}")"
-security_opt="$(docker inspect -f '{{json .HostConfig.SecurityOpt}}' "${workspace_container}")"
-pids_limit="$(docker inspect -f '{{.HostConfig.PidsLimit}}' "${workspace_container}")"
-memory="$(docker inspect -f '{{.HostConfig.Memory}}' "${workspace_container}")"
-nano_cpus="$(docker inspect -f '{{.HostConfig.NanoCpus}}' "${workspace_container}")"
-
-if [[ "${read_only}" != "true" ]]; then
-  echo "Workspace runtime root filesystem must be read-only." >&2
-  exit 1
-fi
-if [[ "${cap_drop}" != *"ALL"* ]]; then
-  echo "Workspace runtime must drop all Linux capabilities." >&2
-  exit 1
-fi
-if [[ "${security_opt}" != *"no-new-privileges"* ]]; then
-  echo "Workspace runtime must enable no-new-privileges." >&2
-  exit 1
-fi
-if [[ "${pids_limit}" == "0" || "${pids_limit}" == "-1" ]]; then
-  echo "Workspace runtime must have a PID limit." >&2
-  exit 1
-fi
-if [[ "${memory}" == "0" || "${nano_cpus}" == "0" ]]; then
-  echo "Workspace runtime must have explicit memory and CPU limits." >&2
-  exit 1
-fi
-
-printf 'Workspace runtime hardening is active: read-only rootfs, capabilities dropped, no-new-privileges, CPU/memory/PID limits.\n'
-printf 'Workspace ownership preflight passed. Public staging remains blocked pending dedicated per-workspace execution and egress controls.\n'
+echo "Neither the dedicated workspace manager nor a supported legacy workspace runtime is available." >&2
+exit 1
