@@ -66,12 +66,15 @@ class WorkspaceOwnershipMiddleware(BaseHTTPMiddleware):
                 request_payload = {}
             repository_url = request_payload.get("repository_url") if isinstance(request_payload, dict) else None
             response = await call_next(request)
-            if response.status_code != 201:
+            if not 200 <= response.status_code < 300:
                 return response
             body, buffered = await _buffer_response(response)
+            workspace_id: str | None = None
             try:
                 payload = json.loads(body)
                 workspace_id = payload["workspace_id"]
+                if not isinstance(workspace_id, str):
+                    raise ValueError("Workspace id missing from create response")
                 if not isinstance(repository_url, str) or not repository_url:
                     raise ValueError("Repository URL missing from create request")
                 register_workspace(workspace_id=workspace_id, principal=principal, repository_url=repository_url)
@@ -84,7 +87,7 @@ class WorkspaceOwnershipMiddleware(BaseHTTPMiddleware):
                     details={"repository_url": repository_url},
                 )
             except Exception:
-                if isinstance(locals().get("workspace_id"), str):
+                if workspace_id:
                     await _destroy_unregistered_workspace(workspace_id)
                 return JSONResponse(status_code=503, content={"detail": "Workspace ownership registration failed safely"})
             return buffered
