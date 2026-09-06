@@ -15,7 +15,7 @@ from app.entrypoint import (
 
 def _repo(root: Path, workspace_id: str = "a" * 32) -> Path:
     repo = root / workspace_id / "repo"
-    (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "refs" / "heads").mkdir(parents=True)
     return repo
 
 
@@ -30,7 +30,7 @@ def test_runtime_repo_requires_one_strict_broker_workspace(tmp_path):
 
 def test_runtime_repo_ignores_non_workspace_names(tmp_path):
     ignored = tmp_path / "not-a-workspace" / "repo"
-    (ignored / ".git").mkdir(parents=True)
+    (ignored / ".git" / "refs" / "heads").mkdir(parents=True)
     repo = _repo(tmp_path)
     assert _runtime_repo(tmp_path) == repo.resolve()
 
@@ -42,6 +42,21 @@ def test_validated_repo_rejects_symlinked_git_metadata(tmp_path):
     outside.mkdir()
     (repo / ".git").symlink_to(outside, target_is_directory=True)
     with pytest.raises(RuntimeError, match="metadata"):
+        _validated_repo(repo)
+
+
+def test_validated_repo_rejects_unwritable_git_metadata(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    git_dir = repo / ".git"
+    real_access = os.access
+
+    def fake_access(path, mode):
+        if Path(path) == git_dir:
+            return False
+        return real_access(path, mode)
+
+    monkeypatch.setattr(os, "access", fake_access)
+    with pytest.raises(RuntimeError, match="not writable"):
         _validated_repo(repo)
 
 
