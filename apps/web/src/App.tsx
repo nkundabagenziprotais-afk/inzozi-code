@@ -1,5 +1,6 @@
 import Editor from '@monaco-editor/react'
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import RemoveRepositoryDialog from './RemoveRepositoryDialog'
 import {
   loadRepositoryHistory,
   rememberRepository,
@@ -222,6 +223,7 @@ export default function App() {
   const [repositoryUrl, setRepositoryUrl] = useState('')
   const [repositoryRef, setRepositoryRef] = useState('')
   const [repositoryHistory, setRepositoryHistory] = useState<RepositoryHistoryItem[]>(() => loadRepositoryHistory())
+  const [repositoryPendingRemoval, setRepositoryPendingRemoval] = useState<RepositoryHistoryItem | null>(null)
   const [workspaceId, setWorkspaceId] = useState('')
   const [treePath, setTreePath] = useState('')
   const [entries, setEntries] = useState<TreeEntry[]>([])
@@ -352,18 +354,26 @@ export default function App() {
     await createWorkspace(item.repository_url, item.ref)
   }
 
-  function removeRepositoryFromHistory(item: RepositoryHistoryItem) {
-    if (busy || typeof window === 'undefined') return
-    const confirmed = window.confirm(
-      `Remove ${repoLabel(item.repository_url)} from Inzozi Code recent repositories?\n\nThis does not delete or change the GitHub repository.`,
-    )
-    if (!confirmed) return
+  function requestRepositoryRemoval(item: RepositoryHistoryItem) {
+    if (busy) return
+    setRepositoryPendingRemoval(item)
+  }
+
+  function cancelRepositoryRemoval() {
+    if (busy) return
+    setRepositoryPendingRemoval(null)
+  }
+
+  function confirmRepositoryRemoval() {
+    const item = repositoryPendingRemoval
+    if (!item || busy || typeof window === 'undefined') return
     setRepositoryHistory(removeRememberedRepository(item.repository_url, item.ref))
     window.localStorage.removeItem(projectPolicyKey(item.repository_url))
     if (!workspaceId && repositoryUrl.replace(/\.git$/, '').toLowerCase() === item.repository_url.toLowerCase() && repositoryRef.trim() === item.ref) {
       setRepositoryUrl('')
       setRepositoryRef('')
     }
+    setRepositoryPendingRemoval(null)
     setWorkspaceMessage('Repository removed from Inzozi Code history. The GitHub repository was not changed.')
   }
 
@@ -727,295 +737,307 @@ export default function App() {
   )
 
   return (
-    <main className={`app-shell ${bottomCollapsed ? 'bottom-collapsed' : ''}`}>
-      <header className="topbar">
-        <div className="brand">
-          <span className="mark">IC</span>
-          <div><strong>Inzozi Code</strong><small>AI software engineering workspace</small></div>
-        </div>
-        <div className="project-pill"><span className={`status-dot ${workspaceId ? '' : 'idle'}`} /> {activeProjectName} {workspaceId && repositoryRef && <span className="branch">{repositoryRef}</span>}</div>
-        <div className="agent-name"><span className="agent-status">Aquila</span><span>●</span></div>
-      </header>
-
-      <section className="workspace">
-        <aside className="explorer panel">
-          <div className="panel-title"><span>EXPLORER</span><button onClick={() => workspaceId && loadTree(workspaceId, '')} disabled={!workspaceId} aria-label="Repository root">⌂</button></div>
-          {!workspaceId ? (
-            <form className="connect-form" onSubmit={connectRepository}>
-              <div className="connect-heading">
-                <span className="eyebrow">REPOSITORY</span>
-                <strong>Open a workspace</strong>
-                <p>Bring a GitHub repository into an isolated, guarded workspace.</p>
-              </div>
-              {repositoryHistory.length > 0 && (
-                <div className="recent-repositories" aria-label="Recent repositories">
-                  <div className="recent-repositories-heading">
-                    <strong>Recent repositories</strong>
-                    <small>Remembered on this browser</small>
-                  </div>
-                  {repositoryHistory.map((item) => (
-                    <div className="recent-repository-row" key={`${item.repository_url}:${item.ref}`}>
-                      <button
-                        type="button"
-                        className="recent-repository-open"
-                        onClick={() => reopenRepository(item)}
-                        disabled={busy}
-                        title={`Open ${repoLabel(item.repository_url)}`}
-                      >
-                        <strong>{repoLabel(item.repository_url)}</strong>
-                        <small>{item.ref || 'default branch'} · {historyTime(item.last_opened_at)}</small>
-                      </button>
-                      <button
-                        type="button"
-                        className="recent-repository-remove"
-                        onClick={() => removeRepositoryFromHistory(item)}
-                        disabled={busy}
-                        aria-label={`Remove ${repoLabel(item.repository_url)} from recent repositories`}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-                  <small className="recent-repositories-note">Remove forgets the entry and local project preferences. It never deletes the GitHub repository.</small>
-                </div>
-              )}
-              <div className="github-selector-placeholder">
-                <div><span>GitHub</span><strong>Repository picker</strong></div>
-                <small>Account and organization selection will activate with the GitHub App.</small>
-                <button type="button" disabled>GitHub App not connected</button>
-              </div>
-              <div className="manual-connect-label"><span>ALPHA MANUAL URL</span></div>
-              <label>Repository HTTPS URL<input ref={repositoryInputRef} id="repository-url" value={repositoryUrl} onChange={(e) => setRepositoryUrl(e.target.value)} placeholder="https://github.com/owner/repo" /></label>
-              <label>Branch / ref <span>optional</span><input value={repositoryRef} onChange={(e) => setRepositoryRef(e.target.value)} placeholder="main" /></label>
-              <button className="primary-action" disabled={busy || !repositoryUrl.trim()}>{busy ? 'Connecting…' : 'Create guarded workspace'}</button>
-              <small className="workspace-message">{workspaceMessage}</small>
-            </form>
-          ) : (
-            <>
-              <div className="repo-title">{projectName.toUpperCase()}</div>
-              <div className="pathbar">
-                <button disabled={!treePath} onClick={() => loadTree(workspaceId, parentPath(treePath))}>←</button>
-                <span>/{treePath}</span>
-              </div>
-              <nav className="file-list">
-                {entries.map((entry) => (
-                  <button key={`${treePath}/${entry.name}`} className={`file-row ${joinPath(treePath, entry.name) === selectedPath ? 'selected' : ''}`} onClick={() => openEntry(entry)}>
-                    <span>{entry.type === 'directory' ? '▸' : '·'}</span><span>{entry.name}</span>
-                  </button>
-                ))}
-              </nav>
-              <div className="explorer-footer"><span>{workspaceId.slice(0, 8)}</span><button onClick={disconnectWorkspace} disabled={busy}>Disconnect</button></div>
-            </>
-          )}
-        </aside>
-
-        <section className="editor panel">
-          <div className="tabs">
-            <button className="active">{selectedPath || 'Welcome'} {dirty && <span className="dirty-dot">●</span>}</button>
-            {selectedPath && <button className="save-tab" onClick={saveFile} disabled={!dirty || busy}>{busy ? 'Working…' : dirty ? 'Save' : 'Saved'}</button>}
+    <>
+      <main className={`app-shell ${bottomCollapsed ? 'bottom-collapsed' : ''}`}>
+        <header className="topbar">
+          <div className="brand">
+            <span className="mark">IC</span>
+            <div><strong>Inzozi Code</strong><small>AI software engineering workspace</small></div>
           </div>
-          {selectedPath ? (
-            <Editor
-              height="100%"
-              path={selectedPath}
-              language={languageFromPath(selectedPath)}
-              theme="vs-dark"
-              value={fileContent}
-              onChange={(value) => setFileContent(value ?? '')}
-              options={{ automaticLayout: true, fontSize: 13, minimap: { enabled: false }, wordWrap: 'off', scrollBeyondLastLine: false, padding: { top: 16 }, renderWhitespace: 'selection' }}
-            />
-          ) : workspaceId ? (
-            <div className="empty-editor connected-empty">
-              <span className="empty-mark">IC</span>
-              <span className="eyebrow">WORKSPACE READY</span>
-              <h2>Repository connected</h2>
-              <p>Select a file from Explorer or ask Aquila to inspect, plan, design, review, build, or debug the repository.</p>
-              <div className="welcome-actions">
-                <button type="button" className="primary-action" onClick={() => { setMode('plan'); promptRef.current?.focus() }}>Plan with Aquila</button>
-                <button type="button" onClick={() => openBottom('status')}>Review Git status</button>
-              </div>
-              <small>{workspaceMessage}</small>
+          <div className="project-pill"><span className={`status-dot ${workspaceId ? '' : 'idle'}`} /> {activeProjectName} {workspaceId && repositoryRef && <span className="branch">{repositoryRef}</span>}</div>
+          <div className="agent-name"><span className="agent-status">Aquila</span><span>●</span></div>
+        </header>
+
+        <section className="workspace">
+          <aside className="explorer panel">
+            <div className="panel-title"><span>EXPLORER</span><button onClick={() => workspaceId && loadTree(workspaceId, '')} disabled={!workspaceId} aria-label="Repository root">⌂</button></div>
+            {!workspaceId ? (
+              <form className="connect-form" onSubmit={connectRepository}>
+                <div className="connect-heading">
+                  <span className="eyebrow">REPOSITORY</span>
+                  <strong>Open a workspace</strong>
+                  <p>Bring a GitHub repository into an isolated, guarded workspace.</p>
+                </div>
+                {repositoryHistory.length > 0 && (
+                  <div className="recent-repositories" aria-label="Recent repositories">
+                    <div className="recent-repositories-heading">
+                      <strong>Recent repositories</strong>
+                      <small>Remembered on this browser</small>
+                    </div>
+                    {repositoryHistory.map((item) => (
+                      <div className="recent-repository-row" key={`${item.repository_url}:${item.ref}`}>
+                        <button
+                          type="button"
+                          className="recent-repository-open"
+                          onClick={() => reopenRepository(item)}
+                          disabled={busy}
+                          title={`Open ${repoLabel(item.repository_url)}`}
+                        >
+                          <strong>{repoLabel(item.repository_url)}</strong>
+                          <small>{item.ref || 'default branch'} · {historyTime(item.last_opened_at)}</small>
+                        </button>
+                        <button
+                          type="button"
+                          className="recent-repository-remove"
+                          onClick={() => requestRepositoryRemoval(item)}
+                          disabled={busy}
+                          aria-label={`Remove ${repoLabel(item.repository_url)} from recent repositories`}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                    <small className="recent-repositories-note">Remove forgets the entry and local project preferences. It never deletes the GitHub repository.</small>
+                  </div>
+                )}
+                <div className="github-selector-placeholder">
+                  <div><span>GitHub</span><strong>Repository picker</strong></div>
+                  <small>Account and organization selection will activate with the GitHub App.</small>
+                  <button type="button" disabled>GitHub App not connected</button>
+                </div>
+                <div className="manual-connect-label"><span>ALPHA MANUAL URL</span></div>
+                <label>Repository HTTPS URL<input ref={repositoryInputRef} id="repository-url" value={repositoryUrl} onChange={(e) => setRepositoryUrl(e.target.value)} placeholder="https://github.com/owner/repo" /></label>
+                <label>Branch / ref <span>optional</span><input value={repositoryRef} onChange={(e) => setRepositoryRef(e.target.value)} placeholder="main" /></label>
+                <button className="primary-action" disabled={busy || !repositoryUrl.trim()}>{busy ? 'Connecting…' : 'Create guarded workspace'}</button>
+                <small className="workspace-message">{workspaceMessage}</small>
+              </form>
+            ) : (
+              <>
+                <div className="repo-title">{projectName.toUpperCase()}</div>
+                <div className="pathbar">
+                  <button disabled={!treePath} onClick={() => loadTree(workspaceId, parentPath(treePath))}>←</button>
+                  <span>/{treePath}</span>
+                </div>
+                <nav className="file-list">
+                  {entries.map((entry) => (
+                    <button key={`${treePath}/${entry.name}`} className={`file-row ${joinPath(treePath, entry.name) === selectedPath ? 'selected' : ''}`} onClick={() => openEntry(entry)}>
+                      <span>{entry.type === 'directory' ? '▸' : '·'}</span><span>{entry.name}</span>
+                    </button>
+                  ))}
+                </nav>
+                <div className="explorer-footer"><span>{workspaceId.slice(0, 8)}</span><button onClick={disconnectWorkspace} disabled={busy}>Disconnect</button></div>
+              </>
+            )}
+          </aside>
+
+          <section className="editor panel">
+            <div className="tabs">
+              <button className="active">{selectedPath || 'Welcome'} {dirty && <span className="dirty-dot">●</span>}</button>
+              {selectedPath && <button className="save-tab" onClick={saveFile} disabled={!dirty || busy}>{busy ? 'Working…' : dirty ? 'Save' : 'Saved'}</button>}
             </div>
-          ) : (
-            <div className="empty-editor first-run">
-              <div className="welcome-card">
+            {selectedPath ? (
+              <Editor
+                height="100%"
+                path={selectedPath}
+                language={languageFromPath(selectedPath)}
+                theme="vs-dark"
+                value={fileContent}
+                onChange={(value) => setFileContent(value ?? '')}
+                options={{ automaticLayout: true, fontSize: 13, minimap: { enabled: false }, wordWrap: 'off', scrollBeyondLastLine: false, padding: { top: 16 }, renderWhitespace: 'selection' }}
+              />
+            ) : workspaceId ? (
+              <div className="empty-editor connected-empty">
                 <span className="empty-mark">IC</span>
-                <span className="eyebrow">INZOZI CODE ALPHA</span>
-                <h2>Build with Aquila, without giving up control.</h2>
-                <p>Open a repository, inspect and edit real files, run guarded checks, review diffs, and move through explicit Git approval gates.</p>
+                <span className="eyebrow">WORKSPACE READY</span>
+                <h2>Repository connected</h2>
+                <p>Select a file from Explorer or ask Aquila to inspect, plan, design, review, build, or debug the repository.</p>
                 <div className="welcome-actions">
-                  <button type="button" className="primary-action" onClick={() => repositoryInputRef.current?.focus()}>Connect repository</button>
-                  <button type="button" onClick={() => { setMode('plan'); setPrompt('Explain how Inzozi Code keeps repository changes reviewable and safe.'); promptRef.current?.focus() }}>Explore Aquila</button>
+                  <button type="button" className="primary-action" onClick={() => { setMode('plan'); promptRef.current?.focus() }}>Plan with Aquila</button>
+                  <button type="button" onClick={() => openBottom('status')}>Review Git status</button>
                 </div>
-                <div className="trust-strip">
-                  <span><strong>Guarded tools</strong><small>No arbitrary shell</small></span>
-                  <span><strong>Human approval</strong><small>Commit · push · draft PR</small></span>
-                  <span><strong>Merge disabled</strong><small>Production remains separate</small></span>
+                <small>{workspaceMessage}</small>
+              </div>
+            ) : (
+              <div className="empty-editor first-run">
+                <div className="welcome-card">
+                  <span className="empty-mark">IC</span>
+                  <span className="eyebrow">INZOZI CODE ALPHA</span>
+                  <h2>Build with Aquila, without giving up control.</h2>
+                  <p>Open a repository, inspect and edit real files, run guarded checks, review diffs, and move through explicit Git approval gates.</p>
+                  <div className="welcome-actions">
+                    <button type="button" className="primary-action" onClick={() => repositoryInputRef.current?.focus()}>Connect repository</button>
+                    <button type="button" onClick={() => { setMode('plan'); setPrompt('Explain how Inzozi Code keeps repository changes reviewable and safe.'); promptRef.current?.focus() }}>Explore Aquila</button>
+                  </div>
+                  <div className="trust-strip">
+                    <span><strong>Guarded tools</strong><small>No arbitrary shell</small></span>
+                    <span><strong>Human approval</strong><small>Commit · push · draft PR</small></span>
+                    <span><strong>Merge disabled</strong><small>Production remains separate</small></span>
+                  </div>
+                  <small className="welcome-note">Manual GitHub URL is enabled for this private alpha. Connected repositories can be remembered locally for quick reuse without storing credentials.</small>
                 </div>
-                <small className="welcome-note">Manual GitHub URL is enabled for this private alpha. Connected repositories can be remembered locally for quick reuse without storing credentials.</small>
+              </div>
+            )}
+          </section>
+
+          <aside className="aquila panel">
+            <div className="aquila-heading">
+              <div><span className="spark">✦</span><strong>Aquila</strong></div>
+              <small>{agentRoute}</small>
+            </div>
+
+            <div className="mode-section">
+              <div className="mode-summary"><span className="eyebrow">MODE</span><strong>{MODE_DETAILS[mode].label}</strong><small>{MODE_DETAILS[mode].contract}</small></div>
+              <div className="modes">
+                {(['ask','plan','design','build','debug','review','deploy'] as Mode[]).map((item) => <button key={item} onClick={() => setMode(item)} className={mode === item ? 'active' : ''}>{item}</button>)}
               </div>
             </div>
-          )}
+
+            <details className="provider-picker">
+              <summary><span>References</span><small>{availableProviders} ready · use @mentions</small></summary>
+              <div className="provider-strip" aria-label="AI providers and external agents">
+                <div>
+                  {providers.map((provider) => (
+                    <button
+                      key={provider.alias}
+                      type="button"
+                      onClick={() => mentionProvider(provider.alias)}
+                      className={provider.configured ? 'provider-chip ready' : 'provider-chip pending'}
+                      title={`${provider.display_name} · ${provider.configured ? 'ready' : 'registered, connector pending'}`}
+                    >
+                      @{provider.alias}<i>{provider.configured ? '●' : '○'}</i>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </details>
+
+            <details className="routing-policy">
+              <summary>Project AI roles</summary>
+              <div className="routing-policy-grid">
+                <label>Primary<select value={projectPolicy.primary_provider} onChange={(e) => updateProjectPolicy('primary_provider', e.target.value)}>{providers.map((provider) => <option key={`primary-${provider.alias}`} value={provider.alias}>@{provider.alias}</option>)}</select></label>
+                <label>Design<select value={projectPolicy.design_provider} onChange={(e) => updateProjectPolicy('design_provider', e.target.value)}>{providers.map((provider) => <option key={`design-${provider.alias}`} value={provider.alias}>@{provider.alias}</option>)}</select></label>
+                <label>Reviewer<select value={projectPolicy.review_provider} onChange={(e) => updateProjectPolicy('review_provider', e.target.value)}>{providers.map((provider) => <option key={`review-${provider.alias}`} value={provider.alias}>@{provider.alias}</option>)}</select></label>
+              </div>
+              <small>Explicit @mentions override these defaults. Alpha preferences are stored locally per repository; no credentials are stored here.</small>
+            </details>
+
+            <div className="agent-output">
+              <div className="agent-output-heading"><span className="output-label">AQUILA / {mode.toUpperCase()}</span><span className="route-badge">{workspaceId ? 'guarded context' : 'no repo context'}</span></div>
+              <p>{agentMessage}</p>
+              <div className="context-card"><span>CONTEXT</span><strong>{workspaceId ? projectName : 'No workspace'}</strong><small>{selectedPath || 'No file selected'}</small></div>
+            </div>
+
+            <form onSubmit={submitAgent} className="prompt-box">
+              <textarea ref={promptRef} id="aquila-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="Aquila prompt" placeholder="Ask Aquila about this repository. Use @chatgpt or another reference when needed." />
+              <div><span>{MODE_DETAILS[mode].contract}</span><button disabled={busy || !prompt.trim()}>{busy ? 'Running…' : 'Run →'}</button></div>
+            </form>
+          </aside>
         </section>
 
-        <aside className="aquila panel">
-          <div className="aquila-heading">
-            <div><span className="spark">✦</span><strong>Aquila</strong></div>
-            <small>{agentRoute}</small>
+        <section className={`bottom panel ${bottomCollapsed ? 'collapsed' : ''}`}>
+          <div className="bottom-tabs">
+            <button onClick={() => openBottom('terminal')} className={bottomTab === 'terminal' && !bottomCollapsed ? 'active' : ''}>TERMINAL</button>
+            <button onClick={() => { openBottom('status'); refreshGit() }} className={bottomTab === 'status' && !bottomCollapsed ? 'active' : ''}>GIT STATUS</button>
+            <button onClick={() => { openBottom('diff'); refreshGit() }} className={bottomTab === 'diff' && !bottomCollapsed ? 'active' : ''}>GIT DIFF</button>
+            <button onClick={() => { openBottom('review'); loadGitReview() }} className={bottomTab === 'review' && !bottomCollapsed ? 'active' : ''}>GIT REVIEW</button>
+            <span className="command-spacer" />
+            <button disabled={!workspaceId || busy} onClick={() => runAction('git_status')}>status</button>
+            <button disabled={!workspaceId || busy} onClick={() => runAction('python_tests')}>pytest</button>
+            <button disabled={!workspaceId || busy} onClick={() => runAction('node_build')}>node build</button>
+            <button disabled={!workspaceId || busy} onClick={() => runAction('php_tests')}>php tests</button>
+            <button type="button" className="bottom-toggle" onClick={() => setBottomCollapsed((current) => !current)} aria-label={bottomCollapsed ? 'Expand bottom panel' : 'Collapse bottom panel'}>{bottomCollapsed ? '⌃ Expand' : '⌄ Collapse'}</button>
           </div>
 
-          <div className="mode-section">
-            <div className="mode-summary"><span className="eyebrow">MODE</span><strong>{MODE_DETAILS[mode].label}</strong><small>{MODE_DETAILS[mode].contract}</small></div>
-            <div className="modes">
-              {(['ask','plan','design','build','debug','review','deploy'] as Mode[]).map((item) => <button key={item} onClick={() => setMode(item)} className={mode === item ? 'active' : ''}>{item}</button>)}
-            </div>
-          </div>
-
-          <details className="provider-picker">
-            <summary><span>References</span><small>{availableProviders} ready · use @mentions</small></summary>
-            <div className="provider-strip" aria-label="AI providers and external agents">
-              <div>
-                {providers.map((provider) => (
-                  <button
-                    key={provider.alias}
-                    type="button"
-                    onClick={() => mentionProvider(provider.alias)}
-                    className={provider.configured ? 'provider-chip ready' : 'provider-chip pending'}
-                    title={`${provider.display_name} · ${provider.configured ? 'ready' : 'registered, connector pending'}`}
-                  >
-                    @{provider.alias}<i>{provider.configured ? '●' : '○'}</i>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </details>
-
-          <details className="routing-policy">
-            <summary>Project AI roles</summary>
-            <div className="routing-policy-grid">
-              <label>Primary<select value={projectPolicy.primary_provider} onChange={(e) => updateProjectPolicy('primary_provider', e.target.value)}>{providers.map((provider) => <option key={`primary-${provider.alias}`} value={provider.alias}>@{provider.alias}</option>)}</select></label>
-              <label>Design<select value={projectPolicy.design_provider} onChange={(e) => updateProjectPolicy('design_provider', e.target.value)}>{providers.map((provider) => <option key={`design-${provider.alias}`} value={provider.alias}>@{provider.alias}</option>)}</select></label>
-              <label>Reviewer<select value={projectPolicy.review_provider} onChange={(e) => updateProjectPolicy('review_provider', e.target.value)}>{providers.map((provider) => <option key={`review-${provider.alias}`} value={provider.alias}>@{provider.alias}</option>)}</select></label>
-            </div>
-            <small>Explicit @mentions override these defaults. Alpha preferences are stored locally per repository; no credentials are stored here.</small>
-          </details>
-
-          <div className="agent-output">
-            <div className="agent-output-heading"><span className="output-label">AQUILA / {mode.toUpperCase()}</span><span className="route-badge">{workspaceId ? 'guarded context' : 'no repo context'}</span></div>
-            <p>{agentMessage}</p>
-            <div className="context-card"><span>CONTEXT</span><strong>{workspaceId ? projectName : 'No workspace'}</strong><small>{selectedPath || 'No file selected'}</small></div>
-          </div>
-
-          <form onSubmit={submitAgent} className="prompt-box">
-            <textarea ref={promptRef} id="aquila-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="Aquila prompt" placeholder="Ask Aquila about this repository. Use @chatgpt or another reference when needed." />
-            <div><span>{MODE_DETAILS[mode].contract}</span><button disabled={busy || !prompt.trim()}>{busy ? 'Running…' : 'Run →'}</button></div>
-          </form>
-        </aside>
-      </section>
-
-      <section className={`bottom panel ${bottomCollapsed ? 'collapsed' : ''}`}>
-        <div className="bottom-tabs">
-          <button onClick={() => openBottom('terminal')} className={bottomTab === 'terminal' && !bottomCollapsed ? 'active' : ''}>TERMINAL</button>
-          <button onClick={() => { openBottom('status'); refreshGit() }} className={bottomTab === 'status' && !bottomCollapsed ? 'active' : ''}>GIT STATUS</button>
-          <button onClick={() => { openBottom('diff'); refreshGit() }} className={bottomTab === 'diff' && !bottomCollapsed ? 'active' : ''}>GIT DIFF</button>
-          <button onClick={() => { openBottom('review'); loadGitReview() }} className={bottomTab === 'review' && !bottomCollapsed ? 'active' : ''}>GIT REVIEW</button>
-          <span className="command-spacer" />
-          <button disabled={!workspaceId || busy} onClick={() => runAction('git_status')}>status</button>
-          <button disabled={!workspaceId || busy} onClick={() => runAction('python_tests')}>pytest</button>
-          <button disabled={!workspaceId || busy} onClick={() => runAction('node_build')}>node build</button>
-          <button disabled={!workspaceId || busy} onClick={() => runAction('php_tests')}>php tests</button>
-          <button type="button" className="bottom-toggle" onClick={() => setBottomCollapsed((current) => !current)} aria-label={bottomCollapsed ? 'Expand bottom panel' : 'Collapse bottom panel'}>{bottomCollapsed ? '⌃ Expand' : '⌄ Collapse'}</button>
-        </div>
-
-        {!bottomCollapsed && (bottomTab !== 'review' ? (
-          <pre className="terminal-output">{bottomTab === 'terminal' ? terminalOutput : bottomTab === 'status' ? gitStatus : gitDiff}</pre>
-        ) : (
-          <div className="git-review-panel">
-            <div className="git-review-summary">
-              <div>
-                <span className="git-review-eyebrow">HUMAN APPROVAL GATES</span>
-                <strong>{gitReview?.branch || 'No workspace branch'}</strong>
-                <small>{gitReview?.protected_branch ? 'Protected branch · create a safe branch before commit' : 'Local commit, remote push and draft PR use separate approvals'}</small>
-              </div>
-              <button type="button" disabled={!workspaceId || busy} onClick={() => loadGitReview()}>Refresh review</button>
-            </div>
-
-            <div className="git-review-controls">
-              {gitReview?.protected_branch ? (
-                <form onSubmit={createSafeBranch} className="git-review-form">
-                  <label>Safe branch<input value={branchName} onChange={(e) => setBranchName(e.target.value)} placeholder="feature/project-change" /></label>
-                  <button disabled={busy || !workspaceId}>Create local branch</button>
-                </form>
-              ) : (
-                <form onSubmit={prepareCommit} className="git-review-form">
-                  <label>Commit message<input value={commitMessage} onChange={(e) => setCommitMessage(e.target.value)} maxLength={120} /></label>
-                  <button disabled={busy || !workspaceId || !gitReview?.dirty}>Prepare commit</button>
-                </form>
-              )}
-
-              {commitApproval && (
-                <div className="commit-approval-card">
-                  <div><span>LOCAL COMMIT REVIEW LOCKED</span><strong>{commitApproval.changed_paths.length} changed path{commitApproval.changed_paths.length === 1 ? '' : 's'}</strong></div>
-                  <small>Expires {approvalTime(commitApproval.expires_at)} · tree {commitApproval.tree_hash.slice(0, 12)}</small>
-                  <button type="button" disabled={busy} onClick={approveCommit}>Approve local commit</button>
-                </div>
-              )}
-            </div>
-
-            <div className="remote-push-gate">
-              <div>
-                <span>REMOTE WRITE</span>
-                <strong>{lastLocalCommitSha ? `Local commit ${lastLocalCommitSha.slice(0, 12)}` : 'Create an approved local commit first'}</strong>
-                <small>No force push · no PR bundled with push · no merge</small>
-              </div>
-              {pushApproval ? (
-                <div className="push-approval-actions">
-                  <small>{pushApproval.branch} · expires {approvalTime(pushApproval.expires_at)}</small>
-                  <button type="button" disabled={busy} onClick={approvePush}>Approve remote push</button>
-                </div>
-              ) : (
-                <button type="button" disabled={!canPreparePush || busy} onClick={preparePush}>Prepare remote push</button>
-              )}
-            </div>
-
-            <div className="pull-request-gate">
-              <div className="pull-request-heading">
+          {!bottomCollapsed && (bottomTab !== 'review' ? (
+            <pre className="terminal-output">{bottomTab === 'terminal' ? terminalOutput : bottomTab === 'status' ? gitStatus : gitDiff}</pre>
+          ) : (
+            <div className="git-review-panel">
+              <div className="git-review-summary">
                 <div>
-                  <span>DRAFT PULL REQUEST</span>
-                  <strong>{lastPushedCommitSha ? `Pushed commit ${lastPushedCommitSha.slice(0, 12)}` : 'Push the reviewed commit before PR creation'}</strong>
-                  <small>Draft only · duplicate PRs are reused · merge unavailable</small>
+                  <span className="git-review-eyebrow">HUMAN APPROVAL GATES</span>
+                  <strong>{gitReview?.branch || 'No workspace branch'}</strong>
+                  <small>{gitReview?.protected_branch ? 'Protected branch · create a safe branch before commit' : 'Local commit, remote push and draft PR use separate approvals'}</small>
                 </div>
-                {pullRequestResult?.pull_request_url && (
-                  <a href={pullRequestResult.pull_request_url} target="_blank" rel="noreferrer">Open PR #{pullRequestResult.pull_request_number ?? ''}</a>
+                <button type="button" disabled={!workspaceId || busy} onClick={() => loadGitReview()}>Refresh review</button>
+              </div>
+
+              <div className="git-review-controls">
+                {gitReview?.protected_branch ? (
+                  <form onSubmit={createSafeBranch} className="git-review-form">
+                    <label>Safe branch<input value={branchName} onChange={(e) => setBranchName(e.target.value)} placeholder="feature/project-change" /></label>
+                    <button disabled={busy || !workspaceId}>Create local branch</button>
+                  </form>
+                ) : (
+                  <form onSubmit={prepareCommit} className="git-review-form">
+                    <label>Commit message<input value={commitMessage} onChange={(e) => setCommitMessage(e.target.value)} maxLength={120} /></label>
+                    <button disabled={busy || !workspaceId || !gitReview?.dirty}>Prepare commit</button>
+                  </form>
+                )}
+
+                {commitApproval && (
+                  <div className="commit-approval-card">
+                    <div><span>LOCAL COMMIT REVIEW LOCKED</span><strong>{commitApproval.changed_paths.length} changed path{commitApproval.changed_paths.length === 1 ? '' : 's'}</strong></div>
+                    <small>Expires {approvalTime(commitApproval.expires_at)} · tree {commitApproval.tree_hash.slice(0, 12)}</small>
+                    <button type="button" disabled={busy} onClick={approveCommit}>Approve local commit</button>
+                  </div>
                 )}
               </div>
 
-              {pullRequestApproval ? (
-                <div className="pull-request-approval-card">
-                  <div>
-                    <span>PR REVIEW LOCKED</span>
-                    <strong>{pullRequestApproval.head_branch} → {pullRequestApproval.base_branch}</strong>
-                    <small>{pullRequestApproval.title} · expires {approvalTime(pullRequestApproval.expires_at)}</small>
-                  </div>
-                  <button type="button" disabled={busy} onClick={approvePullRequest}>Approve draft PR</button>
+              <div className="remote-push-gate">
+                <div>
+                  <span>REMOTE WRITE</span>
+                  <strong>{lastLocalCommitSha ? `Local commit ${lastLocalCommitSha.slice(0, 12)}` : 'Create an approved local commit first'}</strong>
+                  <small>No force push · no PR bundled with push · no merge</small>
                 </div>
-              ) : (
-                <form className="pull-request-form" onSubmit={preparePullRequest}>
-                  <label>Title<input value={pullRequestTitle} onChange={(e) => setPullRequestTitle(e.target.value)} maxLength={120} /></label>
-                  <label>Base<select value={pullRequestBase} onChange={(e) => setPullRequestBase(e.target.value)}>{PR_BASE_BRANCHES.map((branch) => <option key={branch} value={branch}>{branch}</option>)}</select></label>
-                  <label className="pull-request-body">Body<textarea value={pullRequestBody} onChange={(e) => setPullRequestBody(e.target.value)} maxLength={8000} /></label>
-                  <button disabled={!canPreparePullRequest || busy || !pullRequestTitle.trim()}>Prepare draft PR</button>
-                </form>
-              )}
+                {pushApproval ? (
+                  <div className="push-approval-actions">
+                    <small>{pushApproval.branch} · expires {approvalTime(pushApproval.expires_at)}</small>
+                    <button type="button" disabled={busy} onClick={approvePush}>Approve remote push</button>
+                  </div>
+                ) : (
+                  <button type="button" disabled={!canPreparePush || busy} onClick={preparePush}>Prepare remote push</button>
+                )}
+              </div>
+
+              <div className="pull-request-gate">
+                <div className="pull-request-heading">
+                  <div>
+                    <span>DRAFT PULL REQUEST</span>
+                    <strong>{lastPushedCommitSha ? `Pushed commit ${lastPushedCommitSha.slice(0, 12)}` : 'Push the reviewed commit before PR creation'}</strong>
+                    <small>Draft only · duplicate PRs are reused · merge unavailable</small>
+                  </div>
+                  {pullRequestResult?.pull_request_url && (
+                    <a href={pullRequestResult.pull_request_url} target="_blank" rel="noreferrer">Open PR #{pullRequestResult.pull_request_number ?? ''}</a>
+                  )}
+                </div>
+
+                {pullRequestApproval ? (
+                  <div className="pull-request-approval-card">
+                    <div>
+                      <span>PR REVIEW LOCKED</span>
+                      <strong>{pullRequestApproval.head_branch} → {pullRequestApproval.base_branch}</strong>
+                      <small>{pullRequestApproval.title} · expires {approvalTime(pullRequestApproval.expires_at)}</small>
+                    </div>
+                    <button type="button" disabled={busy} onClick={approvePullRequest}>Approve draft PR</button>
+                  </div>
+                ) : (
+                  <form className="pull-request-form" onSubmit={preparePullRequest}>
+                    <label>Title<input value={pullRequestTitle} onChange={(e) => setPullRequestTitle(e.target.value)} maxLength={120} /></label>
+                    <label>Base<select value={pullRequestBase} onChange={(e) => setPullRequestBase(e.target.value)}>{PR_BASE_BRANCHES.map((branch) => <option key={branch} value={branch}>{branch}</option>)}</select></label>
+                    <label className="pull-request-body">Body<textarea value={pullRequestBody} onChange={(e) => setPullRequestBody(e.target.value)} maxLength={8000} /></label>
+                    <button disabled={!canPreparePullRequest || busy || !pullRequestTitle.trim()}>Prepare draft PR</button>
+                  </form>
+                )}
+              </div>
+
+              <div className="git-review-message">{gitReviewMessage}</div>
+              <pre className="git-review-diff">{commitApproval?.diff || gitReview?.diff || 'No reviewed diff. Refresh Git Review after making changes.'}</pre>
             </div>
+          ))}
+        </section>
 
-            <div className="git-review-message">{gitReviewMessage}</div>
-            <pre className="git-review-diff">{commitApproval?.diff || gitReview?.diff || 'No reviewed diff. Refresh Git Review after making changes.'}</pre>
-          </div>
-        ))}
-      </section>
+        <footer><span>Workspace: {workspaceId ? `guarded · ${workspaceId.slice(0, 8)}` : 'disconnected'}</span><span>Route: {agentRoute}</span><span>Git: commit + push + draft PR approval gates</span><span className="healthy">● merge disabled</span></footer>
+      </main>
 
-      <footer><span>Workspace: {workspaceId ? `guarded · ${workspaceId.slice(0, 8)}` : 'disconnected'}</span><span>Route: {agentRoute}</span><span>Git: commit + push + draft PR approval gates</span><span className="healthy">● merge disabled</span></footer>
-    </main>
+      {repositoryPendingRemoval && (
+        <RemoveRepositoryDialog
+          repositoryName={repoLabel(repositoryPendingRemoval.repository_url)}
+          repositoryRef={repositoryPendingRemoval.ref}
+          busy={busy}
+          onCancel={cancelRepositoryRemoval}
+          onConfirm={confirmRepositoryRemoval}
+        />
+      )}
+    </>
   )
 }
