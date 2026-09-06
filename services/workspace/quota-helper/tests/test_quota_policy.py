@@ -1,3 +1,4 @@
+import errno
 import os
 import re
 import stat
@@ -5,6 +6,8 @@ import stat
 from app.main import (
     MAX_PROJECT_ID,
     MIN_PROJECT_ID,
+    PROJECT_QUOTA_FAILURE_ERRNO,
+    PROJECT_QUOTA_FAILURE_ERRNO_NAME,
     WORKSPACE_ID_RE,
     _candidate_project_ids,
     _reclaim_tree_for_removal,
@@ -31,6 +34,11 @@ def test_distinct_workspaces_do_not_share_the_first_candidate():
     left = next(_candidate_project_ids("a" * 32))
     right = next(_candidate_project_ids("b" * 32))
     assert left != right
+
+
+def test_xfs_project_quota_failure_uses_enospc():
+    assert PROJECT_QUOTA_FAILURE_ERRNO == errno.ENOSPC
+    assert PROJECT_QUOTA_FAILURE_ERRNO_NAME == "ENOSPC"
 
 
 def test_reclaim_tree_restores_traversal_top_down_without_following_symlinks(tmp_path, monkeypatch):
