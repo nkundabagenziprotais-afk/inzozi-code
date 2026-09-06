@@ -52,14 +52,19 @@ class WorkspaceOwnershipMiddleware(BaseHTTPMiddleware):
         if not settings.workspace_ownership_enforced:
             return await call_next(request)
 
+        path = request.url.path
+        match = WORKSPACE_PATH_RE.match(path)
+        is_create = request.method == "POST" and path == "/v1/workspaces"
+        if not is_create and match is None:
+            return await call_next(request)
+
         principal = getattr(request.state, "principal", None)
         if not isinstance(principal, AuthPrincipal):
             return JSONResponse(status_code=401, content={"detail": "Authentication required"})
 
-        path = request.url.path
         request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
 
-        if request.method == "POST" and path == "/v1/workspaces":
+        if is_create:
             try:
                 request_payload = await request.json()
             except Exception:
@@ -91,10 +96,6 @@ class WorkspaceOwnershipMiddleware(BaseHTTPMiddleware):
                     await _destroy_unregistered_workspace(workspace_id)
                 return JSONResponse(status_code=503, content={"detail": "Workspace ownership registration failed safely"})
             return buffered
-
-        match = WORKSPACE_PATH_RE.match(path)
-        if match is None:
-            return await call_next(request)
 
         workspace_id = match.group(1)
         try:
