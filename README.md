@@ -6,3 +6,4 @@ AI-native software engineering and deployment platform by Inzozi Digital.
 > Staging target: `code-staging.inzozidigital.com`
 
 Development changes are introduced through reviewable feature branches and pull requests.
+Private staging GitHub App E2E verified.
