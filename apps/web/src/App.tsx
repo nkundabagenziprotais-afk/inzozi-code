@@ -1,5 +1,5 @@
 import Editor from '@monaco-editor/react'
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 
 type Mode = 'ask' | 'plan' | 'design' | 'build' | 'debug' | 'review' | 'deploy'
 type BottomTab = 'terminal' | 'status' | 'diff' | 'review'
@@ -122,6 +122,16 @@ const DEFAULT_PROJECT_POLICY: ProjectPolicy = {
 
 const PR_BASE_BRANCHES = ['main', 'develop', 'staging', 'master', 'development']
 
+const MODE_DETAILS: Record<Mode, { label: string; contract: string }> = {
+  ask: { label: 'Ask', contract: 'Read-only answers grounded in repository evidence.' },
+  plan: { label: 'Plan', contract: 'Read-only implementation planning. No file changes.' },
+  design: { label: 'Design', contract: 'Read-only UX and interface direction across target breakpoints.' },
+  build: { label: 'Build', contract: 'Guarded edits with a preflight checkpoint and approved tools.' },
+  debug: { label: 'Debug', contract: 'Diagnose, make the smallest safe fix, then run approved checks.' },
+  review: { label: 'Review', contract: 'Read-only architecture and code review.' },
+  deploy: { label: 'Deploy', contract: 'Planning only. Production changes require separate approval.' },
+}
+
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
   if (!response.ok) {
@@ -206,6 +216,7 @@ export default function App() {
   const [savedContent, setSavedContent] = useState('')
 
   const [bottomTab, setBottomTab] = useState<BottomTab>('terminal')
+  const [bottomCollapsed, setBottomCollapsed] = useState(true)
   const [terminalOutput, setTerminalOutput] = useState('Workspace commands will appear here.')
   const [gitStatus, setGitStatus] = useState('No workspace connected.')
   const [gitDiff, setGitDiff] = useState('No diff available.')
@@ -225,8 +236,11 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [workspaceMessage, setWorkspaceMessage] = useState('Connect a GitHub repository to a guarded workspace.')
 
+  const repositoryInputRef = useRef<HTMLInputElement>(null)
+  const promptRef = useRef<HTMLTextAreaElement>(null)
   const dirty = fileContent !== savedContent
   const projectName = useMemo(() => repoLabel(repositoryUrl), [repositoryUrl])
+  const availableProviders = providers.filter((provider) => provider.configured).length
 
   useEffect(() => {
     api<{ providers: ProviderItem[] }>('/api/v1/agent/providers')
@@ -257,6 +271,11 @@ export default function App() {
     setGitStatus(review.status || 'Working tree clean.')
     setGitDiff(review.diff || 'No uncommitted diff.')
     return review
+  }
+
+  function openBottom(tab: BottomTab) {
+    setBottomTab(tab)
+    setBottomCollapsed(false)
   }
 
   function invalidateGitApprovals(message: string, invalidateLocalCommit = false) {
@@ -349,7 +368,7 @@ export default function App() {
   async function runAction(action: string) {
     if (!workspaceId) return
     setBusy(true)
-    setBottomTab('terminal')
+    openBottom('terminal')
     setTerminalOutput(`Running ${action}…`)
     setCommitApproval(null)
     setPushApproval(null)
@@ -414,7 +433,7 @@ export default function App() {
       setCommitApproval(approval)
       setGitDiff(approval.diff || 'No diff available.')
       setGitReviewMessage(`Local commit review prepared. Approval expires at ${approvalTime(approval.expires_at)}.`)
-      setBottomTab('review')
+      openBottom('review')
     } catch (error) {
       setCommitApproval(null)
       setGitReviewMessage(error instanceof Error ? error.message : 'Unable to prepare commit review.')
@@ -441,7 +460,7 @@ export default function App() {
       setGitReviewMessage(`Local commit created: ${result.commit_sha.slice(0, 12)}. Nothing was pushed; remote push needs a second approval.`)
       await refreshGit()
       await loadGitReview()
-      setBottomTab('review')
+      openBottom('review')
     } catch (error) {
       setCommitApproval(null)
       setLastLocalCommitSha('')
@@ -467,7 +486,7 @@ export default function App() {
       }
       setPushApproval(approval)
       setGitReviewMessage(`Remote push review locked to ${approval.branch} @ ${approval.commit_sha.slice(0, 12)}. Expires at ${approvalTime(approval.expires_at)}.`)
-      setBottomTab('review')
+      openBottom('review')
     } catch (error) {
       setPushApproval(null)
       setGitReviewMessage(error instanceof Error ? error.message : 'Unable to prepare remote push.')
@@ -491,7 +510,7 @@ export default function App() {
       setLastPushedCommitSha(result.commit_sha)
       setGitReviewMessage(`Pushed ${result.commit_sha.slice(0, 12)} to ${result.branch}. Draft PR creation is available as a separate approval gate.`)
       await loadGitReview()
-      setBottomTab('review')
+      openBottom('review')
     } catch (error) {
       setPushApproval(null)
       setGitReviewMessage(error instanceof Error ? error.message : 'Remote push approval failed.')
@@ -522,7 +541,7 @@ export default function App() {
       setPullRequestApproval(approval)
       setPullRequestResult(null)
       setGitReviewMessage(`Draft PR review locked: ${approval.head_branch} → ${approval.base_branch} @ ${approval.commit_sha.slice(0, 12)}. Expires at ${approvalTime(approval.expires_at)}.`)
-      setBottomTab('review')
+      openBottom('review')
     } catch (error) {
       setPullRequestApproval(null)
       setGitReviewMessage(error instanceof Error ? error.message : 'Unable to prepare draft pull request.')
@@ -544,7 +563,7 @@ export default function App() {
       setPullRequestResult(result)
       const number = result.pull_request_number ? `#${result.pull_request_number}` : 'draft PR'
       setGitReviewMessage(`${result.status === 'existing' ? 'Existing' : 'Created'} ${number}: ${result.head_branch} → ${result.base_branch}. It remains draft; no merge or deployment was started.`)
-      setBottomTab('review')
+      openBottom('review')
     } catch (error) {
       setPullRequestApproval(null)
       setGitReviewMessage(error instanceof Error ? error.message : 'Draft pull request approval failed.')
@@ -579,6 +598,7 @@ export default function App() {
       setWorkspaceMessage('Workspace destroyed. Connect another repository when ready.')
       setGitReviewMessage('Review changes before creating a local commit. Remote push and draft PR are separately approval-gated.')
       setAgentMessage('Connect a repository to give Aquila a real workspace context.')
+      setBottomCollapsed(true)
       setBusy(false)
     }
   }
@@ -586,6 +606,7 @@ export default function App() {
   function mentionProvider(alias: string) {
     const mention = `@${alias}`
     setPrompt((current) => current.includes(mention) ? current : `${mention} ${current}`.trim())
+    promptRef.current?.focus()
   }
 
   function updateProjectPolicy(field: keyof ProjectPolicy, value: string | number) {
@@ -623,7 +644,7 @@ export default function App() {
       setAgentRoute(`@${data.provider_alias} · ${data.model}`)
       if (typeof data.git_diff === 'string' && data.git_diff.trim()) {
         setGitDiff(data.git_diff)
-        setBottomTab('diff')
+        openBottom('diff')
       }
       if (data.checkpoint_id) {
         setWorkspaceMessage(`Aquila checkpoint ${data.checkpoint_id.slice(0, 8)} created before agent edits.`)
@@ -661,24 +682,36 @@ export default function App() {
   )
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${bottomCollapsed ? 'bottom-collapsed' : ''}`}>
       <header className="topbar">
-        <div className="brand"><span className="mark">IC</span><div><strong>Inzozi Code</strong><small>AI software engineering workspace</small></div></div>
+        <div className="brand">
+          <span className="mark">IC</span>
+          <div><strong>Inzozi Code</strong><small>AI software engineering workspace</small></div>
+        </div>
         <div className="project-pill"><span className={`status-dot ${workspaceId ? '' : 'idle'}`} /> {projectName} {repositoryRef && <span className="branch">{repositoryRef}</span>}</div>
-        <div className="agent-name">Aquila <span>●</span></div>
+        <div className="agent-name"><span className="agent-status">Aquila</span><span>●</span></div>
       </header>
 
       <section className="workspace">
         <aside className="explorer panel">
-          <div className="panel-title"><span>EXPLORER</span><button onClick={() => workspaceId && loadTree(workspaceId, '')} disabled={!workspaceId}>⌂</button></div>
+          <div className="panel-title"><span>EXPLORER</span><button onClick={() => workspaceId && loadTree(workspaceId, '')} disabled={!workspaceId} aria-label="Repository root">⌂</button></div>
           {!workspaceId ? (
             <form className="connect-form" onSubmit={connectRepository}>
-              <strong>Connect repository</strong>
-              <p>Clone a GitHub repository into a guarded workspace.</p>
-              <label>Repository HTTPS URL<input value={repositoryUrl} onChange={(e) => setRepositoryUrl(e.target.value)} placeholder="https://github.com/owner/repo" /></label>
+              <div className="connect-heading">
+                <span className="eyebrow">REPOSITORY</span>
+                <strong>Open a workspace</strong>
+                <p>Bring a GitHub repository into an isolated, guarded workspace.</p>
+              </div>
+              <div className="github-selector-placeholder">
+                <div><span>GitHub</span><strong>Repository picker</strong></div>
+                <small>Account and organization selection will activate with the GitHub App.</small>
+                <button type="button" disabled>GitHub App not connected</button>
+              </div>
+              <div className="manual-connect-label"><span>ALPHA MANUAL URL</span></div>
+              <label>Repository HTTPS URL<input ref={repositoryInputRef} id="repository-url" value={repositoryUrl} onChange={(e) => setRepositoryUrl(e.target.value)} placeholder="https://github.com/owner/repo" /></label>
               <label>Branch / ref <span>optional</span><input value={repositoryRef} onChange={(e) => setRepositoryRef(e.target.value)} placeholder="main" /></label>
-              <button disabled={busy}>{busy ? 'Connecting…' : 'Create workspace'}</button>
-              <small>{workspaceMessage}</small>
+              <button className="primary-action" disabled={busy || !repositoryUrl.trim()}>{busy ? 'Connecting…' : 'Create guarded workspace'}</button>
+              <small className="workspace-message">{workspaceMessage}</small>
             </form>
           ) : (
             <>
@@ -714,37 +747,72 @@ export default function App() {
               onChange={(value) => setFileContent(value ?? '')}
               options={{ automaticLayout: true, fontSize: 13, minimap: { enabled: false }, wordWrap: 'off', scrollBeyondLastLine: false, padding: { top: 16 }, renderWhitespace: 'selection' }}
             />
-          ) : (
-            <div className="empty-editor">
+          ) : workspaceId ? (
+            <div className="empty-editor connected-empty">
               <span className="empty-mark">IC</span>
-              <h2>{workspaceId ? 'Repository connected' : 'Build with Aquila'}</h2>
-              <p>{workspaceId ? 'Select a file or ask Aquila to plan, design, review, build, or debug the repository.' : 'Connect a repository to begin the real code-review-edit-test loop.'}</p>
+              <span className="eyebrow">WORKSPACE READY</span>
+              <h2>Repository connected</h2>
+              <p>Select a file from Explorer or ask Aquila to inspect, plan, design, review, build, or debug the repository.</p>
+              <div className="welcome-actions">
+                <button type="button" className="primary-action" onClick={() => { setMode('plan'); promptRef.current?.focus() }}>Plan with Aquila</button>
+                <button type="button" onClick={() => openBottom('status')}>Review Git status</button>
+              </div>
               <small>{workspaceMessage}</small>
+            </div>
+          ) : (
+            <div className="empty-editor first-run">
+              <div className="welcome-card">
+                <span className="empty-mark">IC</span>
+                <span className="eyebrow">INZOZI CODE ALPHA</span>
+                <h2>Build with Aquila, without giving up control.</h2>
+                <p>Open a repository, inspect and edit real files, run guarded checks, review diffs, and move through explicit Git approval gates.</p>
+                <div className="welcome-actions">
+                  <button type="button" className="primary-action" onClick={() => repositoryInputRef.current?.focus()}>Connect repository</button>
+                  <button type="button" onClick={() => { setMode('plan'); setPrompt('Explain how Inzozi Code keeps repository changes reviewable and safe.'); promptRef.current?.focus() }}>Explore Aquila</button>
+                </div>
+                <div className="trust-strip">
+                  <span><strong>Guarded tools</strong><small>No arbitrary shell</small></span>
+                  <span><strong>Human approval</strong><small>Commit · push · draft PR</small></span>
+                  <span><strong>Merge disabled</strong><small>Production remains separate</small></span>
+                </div>
+                <small className="welcome-note">Manual GitHub URL is enabled for this private alpha. Account-based repository selection comes with the GitHub App.</small>
+              </div>
             </div>
           )}
         </section>
 
         <aside className="aquila panel">
-          <div className="aquila-heading"><div><span className="spark">✦</span><strong>Aquila</strong></div><small>{agentRoute}</small></div>
-          <div className="modes">
-            {(['ask','plan','design','build','debug','review','deploy'] as Mode[]).map((item) => <button key={item} onClick={() => setMode(item)} className={mode === item ? 'active' : ''}>{item}</button>)}
+          <div className="aquila-heading">
+            <div><span className="spark">✦</span><strong>Aquila</strong></div>
+            <small>{agentRoute}</small>
           </div>
-          <div className="provider-strip" aria-label="AI providers and external agents">
-            <span className="provider-label">REFERENCE</span>
-            <div>
-              {providers.map((provider) => (
-                <button
-                  key={provider.alias}
-                  type="button"
-                  onClick={() => mentionProvider(provider.alias)}
-                  className={provider.configured ? 'provider-chip ready' : 'provider-chip pending'}
-                  title={`${provider.display_name} · ${provider.configured ? 'ready' : 'registered, connector pending'}`}
-                >
-                  @{provider.alias}<i>{provider.configured ? '●' : '○'}</i>
-                </button>
-              ))}
+
+          <div className="mode-section">
+            <div className="mode-summary"><span className="eyebrow">MODE</span><strong>{MODE_DETAILS[mode].label}</strong><small>{MODE_DETAILS[mode].contract}</small></div>
+            <div className="modes">
+              {(['ask','plan','design','build','debug','review','deploy'] as Mode[]).map((item) => <button key={item} onClick={() => setMode(item)} className={mode === item ? 'active' : ''}>{item}</button>)}
             </div>
           </div>
+
+          <details className="provider-picker">
+            <summary><span>References</span><small>{availableProviders} ready · use @mentions</small></summary>
+            <div className="provider-strip" aria-label="AI providers and external agents">
+              <div>
+                {providers.map((provider) => (
+                  <button
+                    key={provider.alias}
+                    type="button"
+                    onClick={() => mentionProvider(provider.alias)}
+                    className={provider.configured ? 'provider-chip ready' : 'provider-chip pending'}
+                    title={`${provider.display_name} · ${provider.configured ? 'ready' : 'registered, connector pending'}`}
+                  >
+                    @{provider.alias}<i>{provider.configured ? '●' : '○'}</i>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </details>
+
           <details className="routing-policy">
             <summary>Project AI roles</summary>
             <div className="routing-policy-grid">
@@ -754,27 +822,35 @@ export default function App() {
             </div>
             <small>Explicit @mentions override these defaults. Alpha preferences are stored locally per repository; no credentials are stored here.</small>
           </details>
-          <div className="agent-output"><span className="output-label">AQUILA / {mode.toUpperCase()}</span><p>{agentMessage}</p><div className="context-card"><span>CONTEXT</span><strong>{workspaceId ? projectName : 'No workspace'}</strong><small>{selectedPath || 'No file selected'}</small></div></div>
+
+          <div className="agent-output">
+            <div className="agent-output-heading"><span className="output-label">AQUILA / {mode.toUpperCase()}</span><span className="route-badge">{workspaceId ? 'guarded context' : 'no repo context'}</span></div>
+            <p>{agentMessage}</p>
+            <div className="context-card"><span>CONTEXT</span><strong>{workspaceId ? projectName : 'No workspace'}</strong><small>{selectedPath || 'No file selected'}</small></div>
+          </div>
+
           <form onSubmit={submitAgent} className="prompt-box">
-            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="Aquila prompt" placeholder="Try: @chatgpt review this API, or @lovable propose a UI direction" />
-            <div><span>{mode === 'deploy' ? 'Plan only · approval required' : mode === 'design' ? 'Read-only design review' : workspaceId ? 'Guarded workspace' : 'No repository tools'}</span><button disabled={busy}>{busy ? 'Running…' : 'Run →'}</button></div>
+            <textarea ref={promptRef} id="aquila-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="Aquila prompt" placeholder="Ask Aquila about this repository. Use @chatgpt or another reference when needed." />
+            <div><span>{MODE_DETAILS[mode].contract}</span><button disabled={busy || !prompt.trim()}>{busy ? 'Running…' : 'Run →'}</button></div>
           </form>
         </aside>
       </section>
 
-      <section className="bottom panel">
+      <section className={`bottom panel ${bottomCollapsed ? 'collapsed' : ''}`}>
         <div className="bottom-tabs">
-          <button onClick={() => setBottomTab('terminal')} className={bottomTab === 'terminal' ? 'active' : ''}>TERMINAL</button>
-          <button onClick={() => { setBottomTab('status'); refreshGit() }} className={bottomTab === 'status' ? 'active' : ''}>GIT STATUS</button>
-          <button onClick={() => { setBottomTab('diff'); refreshGit() }} className={bottomTab === 'diff' ? 'active' : ''}>GIT DIFF</button>
-          <button onClick={() => { setBottomTab('review'); loadGitReview() }} className={bottomTab === 'review' ? 'active' : ''}>GIT REVIEW</button>
+          <button onClick={() => openBottom('terminal')} className={bottomTab === 'terminal' && !bottomCollapsed ? 'active' : ''}>TERMINAL</button>
+          <button onClick={() => { openBottom('status'); refreshGit() }} className={bottomTab === 'status' && !bottomCollapsed ? 'active' : ''}>GIT STATUS</button>
+          <button onClick={() => { openBottom('diff'); refreshGit() }} className={bottomTab === 'diff' && !bottomCollapsed ? 'active' : ''}>GIT DIFF</button>
+          <button onClick={() => { openBottom('review'); loadGitReview() }} className={bottomTab === 'review' && !bottomCollapsed ? 'active' : ''}>GIT REVIEW</button>
           <span className="command-spacer" />
           <button disabled={!workspaceId || busy} onClick={() => runAction('git_status')}>status</button>
           <button disabled={!workspaceId || busy} onClick={() => runAction('python_tests')}>pytest</button>
           <button disabled={!workspaceId || busy} onClick={() => runAction('node_build')}>node build</button>
           <button disabled={!workspaceId || busy} onClick={() => runAction('php_tests')}>php tests</button>
+          <button type="button" className="bottom-toggle" onClick={() => setBottomCollapsed((current) => !current)} aria-label={bottomCollapsed ? 'Expand bottom panel' : 'Collapse bottom panel'}>{bottomCollapsed ? '⌃ Expand' : '⌄ Collapse'}</button>
         </div>
-        {bottomTab !== 'review' ? (
+
+        {!bottomCollapsed && (bottomTab !== 'review' ? (
           <pre className="terminal-output">{bottomTab === 'terminal' ? terminalOutput : bottomTab === 'status' ? gitStatus : gitDiff}</pre>
         ) : (
           <div className="git-review-panel">
@@ -859,7 +935,7 @@ export default function App() {
             <div className="git-review-message">{gitReviewMessage}</div>
             <pre className="git-review-diff">{commitApproval?.diff || gitReview?.diff || 'No reviewed diff. Refresh Git Review after making changes.'}</pre>
           </div>
-        )}
+        ))}
       </section>
 
       <footer><span>Workspace: {workspaceId ? `guarded · ${workspaceId.slice(0, 8)}` : 'disconnected'}</span><span>Route: {agentRoute}</span><span>Git: commit + push + draft PR approval gates</span><span className="healthy">● merge disabled</span></footer>
