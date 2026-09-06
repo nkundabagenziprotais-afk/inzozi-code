@@ -1,0 +1,17 @@
+[project]
+name = "inzozi-code-workspace-manager"
+version = "0.1.0"
+description = "Trusted Docker control plane for dedicated Inzozi Code workspaces"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "uvicorn[standard]>=0.35,<1",
+  "httpx>=0.28,<1",
+  "docker>=7.1,<8",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.4,<9"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
