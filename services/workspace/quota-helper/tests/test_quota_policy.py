@@ -1,7 +1,8 @@
 import errno
 import os
-import re
 import stat
+
+import pytest
 
 from app.main import (
     MAX_PROJECT_ID,
@@ -10,6 +11,8 @@ from app.main import (
     PROJECT_QUOTA_FAILURE_ERRNO_NAME,
     WORKSPACE_ID_RE,
     _candidate_project_ids,
+    _parse_project_id,
+    _project_inherit_enabled,
     _reclaim_tree_for_removal,
 )
 
@@ -39,6 +42,17 @@ def test_distinct_workspaces_do_not_share_the_first_candidate():
 def test_xfs_project_quota_failure_uses_enospc():
     assert PROJECT_QUOTA_FAILURE_ERRNO == errno.ENOSPC
     assert PROJECT_QUOTA_FAILURE_ERRNO_NAME == "ENOSPC"
+
+
+def test_project_assignment_verification_parses_exact_numeric_id():
+    assert _parse_project_id("projid = 1563961394\n") == 1563961394
+    with pytest.raises(RuntimeError, match="verify XFS project id"):
+        _parse_project_id("projid unavailable\n")
+
+
+def test_project_inheritance_verification_requires_p_flag():
+    assert _project_inherit_enabled("----------------P-- /quota-root/workspace\n") is True
+    assert _project_inherit_enabled("------------------- /quota-root/workspace\n") is False
 
 
 def test_reclaim_tree_restores_traversal_top_down_without_following_symlinks(tmp_path, monkeypatch):
