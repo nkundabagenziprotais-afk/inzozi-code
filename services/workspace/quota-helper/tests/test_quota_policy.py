@@ -40,7 +40,8 @@ def test_reclaim_tree_restores_traversal_top_down_without_following_symlinks(tmp
     workspace.mkdir()
     locked.mkdir()
     outside.mkdir()
-    (locked / "file.txt").write_text("data", encoding="utf-8")
+    data_file = locked / "file.txt"
+    data_file.write_text("data", encoding="utf-8")
     link = workspace / "outside-link"
     link.symlink_to(outside, target_is_directory=True)
 
@@ -63,6 +64,7 @@ def test_reclaim_tree_restores_traversal_top_down_without_following_symlinks(tmp
     assert stat.S_IMODE(workspace.stat().st_mode) == 0o700
     assert stat.S_IMODE(locked.stat().st_mode) == 0o700
     assert stat.S_IMODE(outside.stat().st_mode) == 0o755
+    assert data_file.read_text(encoding="utf-8") == "data"
     assert os.fspath(workspace) in chowned
     assert os.fspath(locked) in chowned
     assert os.fspath(link) not in chowned
