@@ -44,17 +44,20 @@ if [[ -n "${manager_container}" ]]; then
 import json
 import os
 payload = json.loads(os.environ["STATUS_JSON"])
-assert payload["mode"] == "dedicated-per-workspace-containers"
+assert payload["mode"] == "brokered-dedicated-workspaces"
 assert payload["workspace_socket_mounts"] == 0
+assert payload["manager_docker_socket"] is False
+assert payload["manager_privilege"] == "unprivileged"
+assert payload["control_plane"] == "narrow-docker-broker"
 assert payload["runtime_egress"] == "denied"
 if payload["active_workspaces"]:
     assert payload["dedicated_networks"] is True
     assert payload["all_runtime_networks_internal"] is True
 PY
-  echo "Workspace ownership is paired with dedicated per-workspace execution and egress-denied runtimes."
+  echo "Workspace ownership is paired with brokered dedicated execution and egress-denied runtimes."
   echo "Workspace ownership preflight passed."
   exit 0
 fi
 
-echo "Neither the dedicated workspace manager nor a supported legacy workspace runtime is available." >&2
+echo "Brokered dedicated workspace manager is unavailable." >&2
 exit 1
