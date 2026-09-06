@@ -101,10 +101,12 @@ if [[ -z "${AUTH_EMAIL}" || -z "${AUTH_PASSWORD_HASH}" || ${#AUTH_SESSION_SECRET
   exit 1
 fi
 
+# Docker Compose interpolates $VAR expressions in unquoted --env-file values.
+# Keep the PBKDF2 hash single-quoted so its dollar-delimited fields remain literal.
 cat >"${LOCAL_FRAGMENT}" <<EOF
 AUTH_ENABLED=true
 AUTH_BOOTSTRAP_EMAIL=${AUTH_EMAIL}
-AUTH_PASSWORD_HASH=${AUTH_PASSWORD_HASH}
+AUTH_PASSWORD_HASH='${AUTH_PASSWORD_HASH}'
 AUTH_SESSION_SECRET=${AUTH_SESSION_SECRET}
 AUTH_BOOTSTRAP_ROLE=${AUTH_BOOTSTRAP_ROLE}
 AUTH_ORGANIZATION_ID=${AUTH_ORGANIZATION_ID}
@@ -187,6 +189,10 @@ chmod 0600 "${env_file}"
 
 if grep -Eq '^AUTH_PASSWORD=' "${env_file}"; then
   echo "Refusing authentication configuration: plaintext AUTH_PASSWORD must not be present." >&2
+  exit 1
+fi
+if ! grep -Eq "^AUTH_PASSWORD_HASH='pbkdf2_sha256\\\$" "${env_file}"; then
+  echo "Refusing authentication configuration: AUTH_PASSWORD_HASH must be single-quoted for Compose safety." >&2
   exit 1
 fi
 
