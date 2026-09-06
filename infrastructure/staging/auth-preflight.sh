@@ -36,7 +36,7 @@ get_env() {
 
 auth_enabled="$(get_env AUTH_ENABLED)"
 auth_email="$(get_env AUTH_BOOTSTRAP_EMAIL)"
-auth_hash="$(get_env AUTH_PASSWORD_HASH)"
+auth_hash_raw="$(get_env AUTH_PASSWORD_HASH)"
 auth_secret="$(get_env AUTH_SESSION_SECRET)"
 auth_role="$(get_env AUTH_BOOTSTRAP_ROLE)"
 auth_cookie_secure="$(get_env AUTH_COOKIE_SECURE)"
@@ -49,6 +49,11 @@ if [[ -z "${auth_email}" || "${auth_email}" != *"@"* ]]; then
   echo "AUTH_BOOTSTRAP_EMAIL is missing or invalid." >&2
   exit 1
 fi
+if [[ "${auth_hash_raw}" != \'pbkdf2_sha256\$*\' ]]; then
+  echo "AUTH_PASSWORD_HASH must be a single-quoted pbkdf2_sha256 hash so Compose cannot interpolate its dollar fields." >&2
+  exit 1
+fi
+auth_hash="${auth_hash_raw:1:${#auth_hash_raw}-2}"
 if [[ "${auth_hash}" != pbkdf2_sha256\$* ]]; then
   echo "AUTH_PASSWORD_HASH must use the pbkdf2_sha256 format." >&2
   exit 1
@@ -66,11 +71,16 @@ if [[ "${auth_cookie_secure}" != "true" && "${auth_cookie_secure}" != "false" ]]
   exit 1
 fi
 
+host_hash_fingerprint="$(printf '%s' "${auth_hash}" | sha256sum | awk '{print $1}')"
+unset auth_hash
+
 cd "${APP_ROOT}"
 COMPOSE=(docker compose --env-file "${ENV_FILE}" -f docker-compose.yml -f "${STAGING_COMPOSE}")
 "${COMPOSE[@]}" config --quiet
 
-"${COMPOSE[@]}" exec -T api python - <<'PY'
+container_hash_fingerprint="$("${COMPOSE[@]}" exec -T api python - <<'PY'
+import hashlib
+
 from app.core.config import get_settings
 from app.security.auth import ROLE_PERMISSIONS
 
@@ -85,8 +95,16 @@ if len(settings.auth_session_secret) < 32:
     raise SystemExit("API container session secret is too short")
 if settings.auth_bootstrap_role not in ROLE_PERMISSIONS:
     raise SystemExit("API container bootstrap role is invalid")
-print("API container authentication configuration is loaded and structurally valid.")
+print(hashlib.sha256(settings.auth_password_hash.encode("utf-8")).hexdigest())
 PY
+)"
+
+if [[ "${container_hash_fingerprint}" != "${host_hash_fingerprint}" ]]; then
+  echo "Refusing auth preflight: AUTH_PASSWORD_HASH changed while passing through Docker Compose." >&2
+  exit 1
+fi
+printf 'API container authentication configuration is loaded and structurally valid.\n'
+printf 'Authentication hash survived Docker Compose interpolation unchanged.\n'
 
 health_json="$(curl --fail --silent --show-error "${API_URL}/health")"
 HEALTH_JSON="${health_json}" python3 - <<'PY'
