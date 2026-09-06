@@ -1,3 +1,4 @@
+import ctypes
 import errno
 import os
 import stat
@@ -5,14 +6,26 @@ import stat
 import pytest
 
 from app.main import (
+    BASIC_BLOCK_BYTES,
+    FS_DQ_BLOCK_LIMITS,
+    FS_PROJ_QUOTA,
+    FsDiskQuota,
     MAX_PROJECT_ID,
     MIN_PROJECT_ID,
     PROJECT_QUOTA_FAILURE_ERRNO,
     PROJECT_QUOTA_FAILURE_ERRNO_NAME,
+    Q_XGETQUOTA,
+    Q_XGETQUOTA_PROJECT,
+    Q_XSETQLIM,
+    Q_XSETQLIM_PROJECT,
     WORKSPACE_ID_RE,
+    XQM_PRJQUOTA,
     _candidate_project_ids,
     _parse_project_id,
     _project_inherit_enabled,
+    _qcmd,
+    _quota_basic_blocks,
+    _quota_record,
     _reclaim_tree_for_removal,
 )
 
@@ -53,6 +66,26 @@ def test_project_assignment_verification_parses_exact_numeric_id():
 def test_project_inheritance_verification_requires_p_flag():
     assert _project_inherit_enabled("----------------P-- /quota-root/workspace\n") is True
     assert _project_inherit_enabled("------------------- /quota-root/workspace\n") is False
+
+
+def test_xfs_quotactl_fd_command_encoding_is_project_scoped():
+    assert Q_XGETQUOTA_PROJECT == _qcmd(Q_XGETQUOTA, XQM_PRJQUOTA)
+    assert Q_XSETQLIM_PROJECT == _qcmd(Q_XSETQLIM, XQM_PRJQUOTA)
+    assert Q_XGETQUOTA_PROJECT & 0xFF == XQM_PRJQUOTA
+    assert Q_XSETQLIM_PROJECT & 0xFF == XQM_PRJQUOTA
+
+
+def test_fs_disk_quota_abi_and_block_limit_record_for_amd64_staging():
+    assert ctypes.sizeof(FsDiskQuota) == 112
+    limit_bytes = 1024 * 1024
+    record = _quota_record(123456, limit_bytes)
+    assert BASIC_BLOCK_BYTES == 512
+    assert _quota_basic_blocks(limit_bytes) == 2048
+    assert record.d_id == 123456
+    assert record.d_flags == FS_PROJ_QUOTA
+    assert record.d_fieldmask == FS_DQ_BLOCK_LIMITS
+    assert record.d_blk_softlimit == 2048
+    assert record.d_blk_hardlimit == 2048
 
 
 def test_reclaim_tree_restores_traversal_top_down_without_following_symlinks(tmp_path, monkeypatch):
