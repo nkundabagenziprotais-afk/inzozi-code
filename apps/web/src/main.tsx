@@ -4,6 +4,7 @@ import App from './App'
 import './styles.css'
 import './project-policy.css'
 import './git-review.css'
+import './pull-request.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
