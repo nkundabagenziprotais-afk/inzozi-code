@@ -90,8 +90,9 @@ async def create_installation_token(
     repository_url: str,
     *,
     contents_permission: Literal["read", "write"] = "read",
+    pull_requests_permission: Literal["read", "write"] | None = None,
 ) -> str:
-    """Mint a short-lived, repository-scoped token with the minimum requested Contents permission."""
+    """Mint a short-lived repository-scoped token with only the requested repository permissions."""
     repository_name = repository_name_from_url(repository_url)
     app_jwt = create_app_jwt()
     headers = {
@@ -100,9 +101,12 @@ async def create_installation_token(
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "Inzozi-Code",
     }
+    permissions: dict[str, str] = {"contents": contents_permission}
+    if pull_requests_permission is not None:
+        permissions["pull_requests"] = pull_requests_permission
     payload = {
         "repositories": [repository_name],
-        "permissions": {"contents": contents_permission},
+        "permissions": permissions,
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
@@ -116,3 +120,81 @@ async def create_installation_token(
     if not isinstance(token, str) or not token:
         raise GitHubAppError("GitHub did not return an installation token")
     return token
+
+
+def _repo_api_headers(token: str) -> dict[str, str]:
+    return {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "Inzozi-Code",
+    }
+
+
+async def get_remote_branch_head(repository_url: str, branch: str, token: str) -> str:
+    owner, repository = repository_coordinates_from_url(repository_url)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(
+            f"{GITHUB_API}/repos/{owner}/{repository}/git/ref/heads/{branch}",
+            headers=_repo_api_headers(token),
+        )
+    if response.status_code == 404:
+        raise GitHubAppError("The reviewed branch is not present on GitHub. Push it before creating a pull request.")
+    if response.is_error:
+        raise GitHubAppError(f"Unable to verify the GitHub branch ({response.status_code})")
+    sha = response.json().get("object", {}).get("sha")
+    if not isinstance(sha, str) or not sha:
+        raise GitHubAppError("GitHub did not return the remote branch commit")
+    return sha
+
+
+async def create_or_get_draft_pull_request(
+    repository_url: str,
+    *,
+    branch: str,
+    base_branch: str,
+    title: str,
+    body: str,
+    token: str,
+) -> dict:
+    owner, repository = repository_coordinates_from_url(repository_url)
+    headers = _repo_api_headers(token)
+    params = {"state": "open", "head": f"{owner}:{branch}", "base": base_branch, "per_page": 10}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        existing = await client.get(
+            f"{GITHUB_API}/repos/{owner}/{repository}/pulls",
+            headers=headers,
+            params=params,
+        )
+        if existing.is_error:
+            raise GitHubAppError(f"Unable to inspect existing pull requests ({existing.status_code})")
+        for item in existing.json():
+            if item.get("head", {}).get("ref") == branch and item.get("base", {}).get("ref") == base_branch:
+                return {
+                    "status": "existing",
+                    "number": item.get("number"),
+                    "html_url": item.get("html_url"),
+                    "draft": bool(item.get("draft")),
+                }
+
+        response = await client.post(
+            f"{GITHUB_API}/repos/{owner}/{repository}/pulls",
+            headers=headers,
+            json={
+                "title": title,
+                "head": branch,
+                "base": base_branch,
+                "body": body,
+                "draft": True,
+                "maintainer_can_modify": False,
+            },
+        )
+    if response.is_error:
+        raise GitHubAppError(f"GitHub pull request creation failed ({response.status_code})")
+    payload = response.json()
+    return {
+        "status": "created",
+        "number": payload.get("number"),
+        "html_url": payload.get("html_url"),
+        "draft": bool(payload.get("draft", True)),
+    }
