@@ -86,6 +86,31 @@ type PushResult = {
   forced: boolean
   pull_request_created: boolean
 }
+type PullRequestApproval = {
+  approval_id: string
+  repository_url: string
+  head_branch: string
+  base_branch: string
+  commit_sha: string
+  title: string
+  body: string
+  draft: boolean
+  expires_at: string
+  requires_human_approval: boolean
+  merge_enabled: boolean
+}
+type PullRequestResult = {
+  status: string
+  repository_url: string
+  head_branch: string
+  base_branch: string
+  commit_sha: string
+  pull_request_number?: number | null
+  pull_request_url?: string | null
+  draft: boolean
+  merged: boolean
+  deployment_started: boolean
+}
 type ApiError = { detail?: string }
 
 const DEFAULT_PROJECT_POLICY: ProjectPolicy = {
@@ -94,6 +119,8 @@ const DEFAULT_PROJECT_POLICY: ProjectPolicy = {
   review_provider: 'chatgpt',
   max_specialists: 2,
 }
+
+const PR_BASE_BRANCHES = ['main', 'develop', 'staging', 'master', 'development']
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -185,10 +212,16 @@ export default function App() {
   const [gitReview, setGitReview] = useState<GitReview | null>(null)
   const [commitApproval, setCommitApproval] = useState<CommitApproval | null>(null)
   const [pushApproval, setPushApproval] = useState<PushApproval | null>(null)
+  const [pullRequestApproval, setPullRequestApproval] = useState<PullRequestApproval | null>(null)
+  const [pullRequestResult, setPullRequestResult] = useState<PullRequestResult | null>(null)
   const [lastLocalCommitSha, setLastLocalCommitSha] = useState('')
+  const [lastPushedCommitSha, setLastPushedCommitSha] = useState('')
   const [commitMessage, setCommitMessage] = useState('feat: apply reviewed Inzozi Code change')
   const [branchName, setBranchName] = useState('feature/inzozi-change')
-  const [gitReviewMessage, setGitReviewMessage] = useState('Review changes before creating a local commit. Remote push is separately approval-gated.')
+  const [pullRequestTitle, setPullRequestTitle] = useState('feat: reviewed Inzozi Code change')
+  const [pullRequestBody, setPullRequestBody] = useState('Reviewed and tested in Inzozi Code.\n\nMerge remains a separate human decision.')
+  const [pullRequestBase, setPullRequestBase] = useState('main')
+  const [gitReviewMessage, setGitReviewMessage] = useState('Review changes before creating a local commit. Remote push and draft PR are separately approval-gated.')
   const [busy, setBusy] = useState(false)
   const [workspaceMessage, setWorkspaceMessage] = useState('Connect a GitHub repository to a guarded workspace.')
 
@@ -229,7 +262,12 @@ export default function App() {
   function invalidateGitApprovals(message: string, invalidateLocalCommit = false) {
     setCommitApproval(null)
     setPushApproval(null)
-    if (invalidateLocalCommit) setLastLocalCommitSha('')
+    setPullRequestApproval(null)
+    setPullRequestResult(null)
+    if (invalidateLocalCommit) {
+      setLastLocalCommitSha('')
+      setLastPushedCommitSha('')
+    }
     setGitReviewMessage(message)
   }
 
@@ -249,7 +287,10 @@ export default function App() {
       setBranchName(`feature/inzozi-change-${payload.workspace_id.slice(0, 6)}`)
       setCommitApproval(null)
       setPushApproval(null)
+      setPullRequestApproval(null)
+      setPullRequestResult(null)
       setLastLocalCommitSha('')
+      setLastPushedCommitSha('')
       await loadTree(payload.workspace_id)
       await refreshGit(payload.workspace_id)
       await loadGitReview(payload.workspace_id)
@@ -312,6 +353,8 @@ export default function App() {
     setTerminalOutput(`Running ${action}…`)
     setCommitApproval(null)
     setPushApproval(null)
+    setPullRequestApproval(null)
+    setPullRequestResult(null)
     try {
       const result = await api<CommandResult>(`/api/v1/workspaces/${workspaceId}/actions`, {
         method: 'POST',
@@ -341,7 +384,10 @@ export default function App() {
       setRepositoryRef(result.branch)
       setCommitApproval(null)
       setPushApproval(null)
+      setPullRequestApproval(null)
+      setPullRequestResult(null)
       setLastLocalCommitSha('')
+      setLastPushedCommitSha('')
       setGitReviewMessage(`Safe local branch created: ${result.branch}`)
       await loadGitReview()
       await refreshGit()
@@ -357,6 +403,8 @@ export default function App() {
     if (!workspaceId || !commitMessage.trim()) return
     setBusy(true)
     setPushApproval(null)
+    setPullRequestApproval(null)
+    setPullRequestResult(null)
     try {
       const approval = await api<CommitApproval>(`/api/v1/workspaces/${workspaceId}/git/commit/prepare`, {
         method: 'POST',
@@ -386,7 +434,10 @@ export default function App() {
       })
       setCommitApproval(null)
       setPushApproval(null)
+      setPullRequestApproval(null)
+      setPullRequestResult(null)
       setLastLocalCommitSha(result.commit_sha)
+      setLastPushedCommitSha('')
       setGitReviewMessage(`Local commit created: ${result.commit_sha.slice(0, 12)}. Nothing was pushed; remote push needs a second approval.`)
       await refreshGit()
       await loadGitReview()
@@ -394,6 +445,7 @@ export default function App() {
     } catch (error) {
       setCommitApproval(null)
       setLastLocalCommitSha('')
+      setLastPushedCommitSha('')
       setGitReviewMessage(error instanceof Error ? error.message : 'Commit approval failed.')
       await loadGitReview().catch(() => undefined)
     } finally {
@@ -404,6 +456,8 @@ export default function App() {
   async function preparePush() {
     if (!workspaceId || !lastLocalCommitSha) return
     setBusy(true)
+    setPullRequestApproval(null)
+    setPullRequestResult(null)
     try {
       const approval = await api<PushApproval>(`/api/v1/workspaces/${workspaceId}/git/push/prepare`, { method: 'POST' })
       if (approval.commit_sha !== lastLocalCommitSha) {
@@ -432,12 +486,68 @@ export default function App() {
         body: JSON.stringify({ approval_id: pushApproval.approval_id }),
       })
       setPushApproval(null)
-      setGitReviewMessage(`Pushed ${result.commit_sha.slice(0, 12)} to ${result.branch}. No pull request or merge was created.`)
+      setPullRequestApproval(null)
+      setPullRequestResult(null)
+      setLastPushedCommitSha(result.commit_sha)
+      setGitReviewMessage(`Pushed ${result.commit_sha.slice(0, 12)} to ${result.branch}. Draft PR creation is available as a separate approval gate.`)
       await loadGitReview()
       setBottomTab('review')
     } catch (error) {
       setPushApproval(null)
       setGitReviewMessage(error instanceof Error ? error.message : 'Remote push approval failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function preparePullRequest(event: FormEvent) {
+    event.preventDefault()
+    if (!workspaceId || !lastPushedCommitSha || !pullRequestTitle.trim()) return
+    setBusy(true)
+    try {
+      const approval = await api<PullRequestApproval>(`/api/v1/workspaces/${workspaceId}/git/pull-request/prepare`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: pullRequestTitle.trim(),
+          body: pullRequestBody.trim(),
+          base_branch: pullRequestBase,
+        }),
+      })
+      if (approval.commit_sha !== lastPushedCommitSha) {
+        setPullRequestApproval(null)
+        setGitReviewMessage('The local HEAD no longer matches the commit pushed in this session. Push the exact reviewed commit before preparing a PR.')
+        return
+      }
+      setPullRequestApproval(approval)
+      setPullRequestResult(null)
+      setGitReviewMessage(`Draft PR review locked: ${approval.head_branch} → ${approval.base_branch} @ ${approval.commit_sha.slice(0, 12)}. Expires at ${approvalTime(approval.expires_at)}.`)
+      setBottomTab('review')
+    } catch (error) {
+      setPullRequestApproval(null)
+      setGitReviewMessage(error instanceof Error ? error.message : 'Unable to prepare draft pull request.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function approvePullRequest() {
+    if (!workspaceId || !pullRequestApproval) return
+    setBusy(true)
+    try {
+      const result = await api<PullRequestResult>(`/api/v1/workspaces/${workspaceId}/git/pull-request/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approval_id: pullRequestApproval.approval_id }),
+      })
+      setPullRequestApproval(null)
+      setPullRequestResult(result)
+      const number = result.pull_request_number ? `#${result.pull_request_number}` : 'draft PR'
+      setGitReviewMessage(`${result.status === 'existing' ? 'Existing' : 'Created'} ${number}: ${result.head_branch} → ${result.base_branch}. It remains draft; no merge or deployment was started.`)
+      setBottomTab('review')
+    } catch (error) {
+      setPullRequestApproval(null)
+      setGitReviewMessage(error instanceof Error ? error.message : 'Draft pull request approval failed.')
     } finally {
       setBusy(false)
     }
@@ -461,10 +571,13 @@ export default function App() {
       setGitReview(null)
       setCommitApproval(null)
       setPushApproval(null)
+      setPullRequestApproval(null)
+      setPullRequestResult(null)
       setLastLocalCommitSha('')
+      setLastPushedCommitSha('')
       setTerminalOutput('Workspace commands will appear here.')
       setWorkspaceMessage('Workspace destroyed. Connect another repository when ready.')
-      setGitReviewMessage('Review changes before creating a local commit. Remote push is separately approval-gated.')
+      setGitReviewMessage('Review changes before creating a local commit. Remote push and draft PR are separately approval-gated.')
       setAgentMessage('Connect a repository to give Aquila a real workspace context.')
       setBusy(false)
     }
@@ -534,6 +647,17 @@ export default function App() {
     && lastLocalCommitSha
     && gitReview.head === lastLocalCommitSha
     && !commitApproval,
+  )
+
+  const canPreparePullRequest = Boolean(
+    workspaceId
+    && gitReview
+    && !gitReview.protected_branch
+    && !gitReview.dirty
+    && lastPushedCommitSha
+    && gitReview.head === lastPushedCommitSha
+    && !commitApproval
+    && !pushApproval,
   )
 
   return (
@@ -658,7 +782,7 @@ export default function App() {
               <div>
                 <span className="git-review-eyebrow">HUMAN APPROVAL GATES</span>
                 <strong>{gitReview?.branch || 'No workspace branch'}</strong>
-                <small>{gitReview?.protected_branch ? 'Protected branch · create a safe branch before commit' : 'Local commit and remote push use separate approvals'}</small>
+                <small>{gitReview?.protected_branch ? 'Protected branch · create a safe branch before commit' : 'Local commit, remote push and draft PR use separate approvals'}</small>
               </div>
               <button type="button" disabled={!workspaceId || busy} onClick={() => loadGitReview()}>Refresh review</button>
             </div>
@@ -689,7 +813,7 @@ export default function App() {
               <div>
                 <span>REMOTE WRITE</span>
                 <strong>{lastLocalCommitSha ? `Local commit ${lastLocalCommitSha.slice(0, 12)}` : 'Create an approved local commit first'}</strong>
-                <small>No force push · no pull request · no merge</small>
+                <small>No force push · no PR bundled with push · no merge</small>
               </div>
               {pushApproval ? (
                 <div className="push-approval-actions">
@@ -701,13 +825,44 @@ export default function App() {
               )}
             </div>
 
+            <div className="pull-request-gate">
+              <div className="pull-request-heading">
+                <div>
+                  <span>DRAFT PULL REQUEST</span>
+                  <strong>{lastPushedCommitSha ? `Pushed commit ${lastPushedCommitSha.slice(0, 12)}` : 'Push the reviewed commit before PR creation'}</strong>
+                  <small>Draft only · duplicate PRs are reused · merge unavailable</small>
+                </div>
+                {pullRequestResult?.pull_request_url && (
+                  <a href={pullRequestResult.pull_request_url} target="_blank" rel="noreferrer">Open PR #{pullRequestResult.pull_request_number ?? ''}</a>
+                )}
+              </div>
+
+              {pullRequestApproval ? (
+                <div className="pull-request-approval-card">
+                  <div>
+                    <span>PR REVIEW LOCKED</span>
+                    <strong>{pullRequestApproval.head_branch} → {pullRequestApproval.base_branch}</strong>
+                    <small>{pullRequestApproval.title} · expires {approvalTime(pullRequestApproval.expires_at)}</small>
+                  </div>
+                  <button type="button" disabled={busy} onClick={approvePullRequest}>Approve draft PR</button>
+                </div>
+              ) : (
+                <form className="pull-request-form" onSubmit={preparePullRequest}>
+                  <label>Title<input value={pullRequestTitle} onChange={(e) => setPullRequestTitle(e.target.value)} maxLength={120} /></label>
+                  <label>Base<select value={pullRequestBase} onChange={(e) => setPullRequestBase(e.target.value)}>{PR_BASE_BRANCHES.map((branch) => <option key={branch} value={branch}>{branch}</option>)}</select></label>
+                  <label className="pull-request-body">Body<textarea value={pullRequestBody} onChange={(e) => setPullRequestBody(e.target.value)} maxLength={8000} /></label>
+                  <button disabled={!canPreparePullRequest || busy || !pullRequestTitle.trim()}>Prepare draft PR</button>
+                </form>
+              )}
+            </div>
+
             <div className="git-review-message">{gitReviewMessage}</div>
             <pre className="git-review-diff">{commitApproval?.diff || gitReview?.diff || 'No reviewed diff. Refresh Git Review after making changes.'}</pre>
           </div>
         )}
       </section>
 
-      <footer><span>Workspace: {workspaceId ? `guarded · ${workspaceId.slice(0, 8)}` : 'disconnected'}</span><span>Route: {agentRoute}</span><span>Git: local commit + remote push approval gates</span><span className="healthy">● no auto-merge</span></footer>
+      <footer><span>Workspace: {workspaceId ? `guarded · ${workspaceId.slice(0, 8)}` : 'disconnected'}</span><span>Route: {agentRoute}</span><span>Git: commit + push + draft PR approval gates</span><span className="healthy">● merge disabled</span></footer>
     </main>
   )
 }
