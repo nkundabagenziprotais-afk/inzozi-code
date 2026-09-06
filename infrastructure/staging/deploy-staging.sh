@@ -45,8 +45,8 @@ echo "Commit: ${COMMIT_SHA}"
 # Validate configuration before build/start. Secrets are supplied by the untracked server env file.
 "${COMPOSE[@]}" config --quiet
 
-# The runtime image is build-only: the manager launches one isolated container per workspace.
-# Build it explicitly with its profile, then start only the long-lived control-plane services.
+# The runtime image is build-only. The narrow privileged broker launches isolated
+# runtime/helper containers; the unprivileged manager never receives Docker access.
 "${COMPOSE[@]}" --profile workspace-runtime-image build --pull
 "${COMPOSE[@]}" up -d --remove-orphans
 
@@ -62,7 +62,7 @@ done
 if [[ "${healthy}" -ne 1 ]]; then
   echo "Staging health check failed: ${HEALTH_URL}" >&2
   "${COMPOSE[@]}" ps >&2
-  "${COMPOSE[@]}" logs --tail=160 api workspace-manager nginx >&2 || true
+  "${COMPOSE[@]}" logs --tail=160 api workspace-manager workspace-broker nginx >&2 || true
   exit 1
 fi
 
