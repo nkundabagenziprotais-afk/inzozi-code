@@ -75,6 +75,9 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    sysctls:
+      net.ipv4.ip_forward: "0"
+      net.ipv6.conf.all.forwarding: "0"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/health', timeout=3)"]
       interval: 5s
