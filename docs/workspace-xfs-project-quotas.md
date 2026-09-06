@@ -29,7 +29,9 @@ Only the privileged workspace broker may launch the quota helper image. The help
 - receives only a strict 32-character workspace ID and broker-configured disk limit;
 - mounts only the configured quota storage root;
 - uses XFS project IDs allocated under a root-only registry outside workspace-visible directories;
-- uses `SYS_ADMIN` and `CHOWN` only inside the short-lived quota helper container;
+- assigns the project ID directly with `xfs_io`, enables the XFS project-inherit flag, and verifies both before continuing;
+- applies/clears the project hard limit through `setquota -P -F xfs`, avoiding false-positive `xfs_quota` command success on a container bind mount;
+- uses only `SYS_ADMIN` and `CHOWN` inside the short-lived quota helper container;
 - is removed after every operation.
 
 The long-lived workspace manager remains unprivileged and has no Docker socket.
@@ -37,12 +39,14 @@ The long-lived workspace manager remains unprivileged and has no Docker socket.
 ## Provisioning order
 
 1. Validate the workspace ID, GitHub URL, ref, TTL, and active-workspace capacity.
-2. Ask the fixed quota helper to allocate a unique project ID and hard XFS limit.
-3. Create a Docker local bind-volume alias pointing to the broker-derived workspace directory.
-4. Create the workspace's private internal Docker network.
-5. Run the short-lived GitHub bootstrap helper against the already-quoted storage.
-6. Measure repository size as defense-in-depth.
-7. Start the isolated long-lived runtime with CPU, memory, PID, tmpfs, capability, and egress restrictions.
+2. Ask the fixed quota helper to allocate a unique project ID.
+3. Assign that ID to the workspace root, enable project inheritance, and verify the inode reports the exact allocated project ID before any clone can begin.
+4. Apply the hard XFS project byte limit through the quota syscall tooling.
+5. Create a Docker local bind-volume alias pointing to the broker-derived workspace directory.
+6. Create the workspace's private internal Docker network.
+7. Run the short-lived GitHub bootstrap helper against the already-quoted storage.
+8. Measure repository size as defense-in-depth.
+9. Start the isolated long-lived runtime with CPU, memory, PID, tmpfs, capability, and egress restrictions.
 
 If any step fails, the broker removes the runtime/network/volume alias and asks the quota helper to remove the XFS project directory and clear its limit.
 
@@ -55,6 +59,7 @@ The staging preflight requires all of the following:
 - project quota enforcement is active;
 - every active workspace has a project ID;
 - active project IDs are unique;
+- helper setup fails closed unless `xfs_io lsproj` reports the exact allocated project ID and the directory has project inheritance enabled;
 - a disposable quota probe sets a 1 MiB hard project limit and verifies that a 2 MiB write fails with `ENOSPC`, which is the XFS project-quota exhaustion errno;
 - the probe directory and limit are removed afterward.
 
