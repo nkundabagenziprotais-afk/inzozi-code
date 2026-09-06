@@ -40,6 +40,7 @@ jobs:
           bash -n infrastructure/hetzner/up.sh
           bash -n infrastructure/hetzner/bootstrap.sh
           bash -n infrastructure/hetzner/configure-github-app.sh
+          bash -n infrastructure/hetzner/resolve-github-installation-id.sh
           bash -n infrastructure/hetzner/down.sh
       - name: Validate Hetzner Terraform
         working-directory: infrastructure/hetzner
