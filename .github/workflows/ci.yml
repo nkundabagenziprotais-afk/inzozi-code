@@ -37,6 +37,7 @@ jobs:
           bash -n infrastructure/staging/deploy-staging.sh
           bash -n infrastructure/staging/github-app-preflight.sh
           bash -n infrastructure/staging/auth-preflight.sh
+          bash -n infrastructure/staging/workspace-ownership-preflight.sh
           bash -n infrastructure/hetzner/prepare-local.sh
           bash -n infrastructure/hetzner/up.sh
           bash -n infrastructure/hetzner/bootstrap.sh
