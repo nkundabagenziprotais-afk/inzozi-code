@@ -6,3 +6,4 @@ AI-native software engineering and deployment platform by Inzozi Digital.
 > Staging target: `code-staging.inzozidigital.com`
 
 Development changes are introduced through reviewable feature branches and pull requests.
+<!-- Inzozi Code quota lifecycle E2E -->
