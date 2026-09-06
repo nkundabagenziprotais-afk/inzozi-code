@@ -55,7 +55,7 @@ The staging preflight requires all of the following:
 - project quota enforcement is active;
 - every active workspace has a project ID;
 - active project IDs are unique;
-- a disposable quota probe sets a 1 MiB hard project limit and verifies that a 2 MiB write fails;
+- a disposable quota probe sets a 1 MiB hard project limit and verifies that a 2 MiB write fails with `ENOSPC`, which is the XFS project-quota exhaustion errno;
 - the probe directory and limit are removed afterward.
 
 The previous post-write `du` check remains enabled as defense-in-depth and anomaly detection, but it is no longer the primary quota boundary.
