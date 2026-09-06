@@ -17,6 +17,10 @@ if [[ "${AUTH_COOKIE_SECURE}" != "true" && "${AUTH_COOKIE_SECURE}" != "false" ]]
   echo "AUTH_COOKIE_SECURE must be true or false." >&2
   exit 1
 fi
+if [[ ! -r /dev/tty || ! -w /dev/tty ]]; then
+  echo "An interactive terminal is required to configure staging authentication." >&2
+  exit 1
+fi
 
 IP="$(terraform -chdir="${HERE}" output -raw ipv4_address 2>/dev/null || true)"
 if [[ -z "${IP}" ]]; then
@@ -33,28 +37,47 @@ TARGET="${ADMIN_USER}@${IP}"
 LOCAL_FRAGMENT="$(mktemp -t inzozi-auth.XXXXXX)"
 REMOTE_FRAGMENT="/tmp/inzozi-auth-${RANDOM}-${RANDOM}.env"
 cleanup() {
+  unset AUTH_PASSWORD AUTH_PASSWORD_CONFIRM AUTH_PASSWORD_HASH AUTH_SESSION_SECRET 2>/dev/null || true
   rm -f "${LOCAL_FRAGMENT}"
   ssh "${SSH_ARGS[@]}" "${TARGET}" "rm -f '${REMOTE_FRAGMENT}'" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 chmod 0600 "${LOCAL_FRAGMENT}"
 
-AUTH_VALUES="$(python3 - <<'PY'
-import base64
-import getpass
-import hashlib
-import re
-import secrets
+IFS= read -r -p "Staging owner email: " AUTH_EMAIL </dev/tty
+AUTH_EMAIL="$(printf '%s' "${AUTH_EMAIL}" | tr '[:upper:]' '[:lower:]' | xargs)"
+if [[ ! "${AUTH_EMAIL}" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
+  echo "A valid email address is required." >&2
+  exit 1
+fi
 
-email = input("Staging owner email: ").strip().casefold()
-if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
-    raise SystemExit("A valid email address is required.")
-password = getpass.getpass("Staging owner password (minimum 12 characters): ")
-confirm = getpass.getpass("Confirm staging owner password: ")
-if password != confirm:
-    raise SystemExit("Passwords do not match.")
-if len(password) < 12:
-    raise SystemExit("Password must contain at least 12 characters.")
+IFS= read -r -s -p "Staging owner password (minimum 12 characters): " AUTH_PASSWORD </dev/tty
+printf '\n' >/dev/tty
+IFS= read -r -s -p "Confirm staging owner password: " AUTH_PASSWORD_CONFIRM </dev/tty
+printf '\n' >/dev/tty
+
+if [[ "${AUTH_PASSWORD}" != "${AUTH_PASSWORD_CONFIRM}" ]]; then
+  echo "Passwords do not match." >&2
+  exit 1
+fi
+if (( ${#AUTH_PASSWORD} < 12 )); then
+  echo "Password must contain at least 12 characters." >&2
+  exit 1
+fi
+unset AUTH_PASSWORD_CONFIRM
+
+AUTH_VALUES="$(python3 - "${AUTH_EMAIL}" 3<<<"${AUTH_PASSWORD}" <<'PY'
+import base64
+import hashlib
+import os
+import secrets
+import sys
+
+email = sys.argv[1]
+with os.fdopen(3, "r", encoding="utf-8", closefd=False) as secret_input:
+    password = secret_input.read()
+password = password.rstrip("\n")
+
 salt = secrets.token_bytes(16)
 iterations = 600_000
 digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations, dklen=32)
@@ -66,6 +89,7 @@ print(password_hash)
 print(session_secret)
 PY
 )"
+unset AUTH_PASSWORD
 
 AUTH_EMAIL="$(printf '%s\n' "${AUTH_VALUES}" | sed -n '1p')"
 AUTH_PASSWORD_HASH="$(printf '%s\n' "${AUTH_VALUES}" | sed -n '2p')"
