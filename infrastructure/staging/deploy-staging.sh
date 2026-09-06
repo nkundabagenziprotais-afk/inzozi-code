@@ -45,13 +45,13 @@ echo "Commit: ${COMMIT_SHA}"
 # Validate configuration before build/start. Secrets are supplied by the untracked server env file.
 "${COMPOSE[@]}" config --quiet
 
-# Build first. If a build fails, the currently running stack is left untouched.
-"${COMPOSE[@]}" build --pull
-
+# The runtime image is build-only: the manager launches one isolated container per workspace.
+# Build it explicitly with its profile, then start only the long-lived control-plane services.
+"${COMPOSE[@]}" --profile workspace-runtime-image build --pull
 "${COMPOSE[@]}" up -d --remove-orphans
 
 healthy=0
-for _ in $(seq 1 30); do
+for _ in $(seq 1 40); do
   if curl --fail --silent --show-error "${HEALTH_URL}" >/dev/null; then
     healthy=1
     break
@@ -62,7 +62,7 @@ done
 if [[ "${healthy}" -ne 1 ]]; then
   echo "Staging health check failed: ${HEALTH_URL}" >&2
   "${COMPOSE[@]}" ps >&2
-  "${COMPOSE[@]}" logs --tail=120 api nginx >&2 || true
+  "${COMPOSE[@]}" logs --tail=160 api workspace-manager nginx >&2 || true
   exit 1
 fi
 
