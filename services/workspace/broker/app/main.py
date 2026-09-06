@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 import hmac
+import json
 import os
 import re
 import socket
@@ -14,6 +15,8 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field, SecretStr
 
 RUNTIME_IMAGE = os.getenv("WORKSPACE_RUNTIME_IMAGE", "inzozi-code-workspace-runtime:local")
+QUOTA_HELPER_IMAGE = os.getenv("WORKSPACE_QUOTA_HELPER_IMAGE", "inzozi-code-workspace-quota-helper:local")
+QUOTA_STORAGE_ROOT = os.getenv("WORKSPACE_QUOTA_STORAGE_ROOT", "/srv/inzozi-code/workspace-data").rstrip("/")
 MANAGER_SERVICE_HOST = os.getenv("WORKSPACE_MANAGER_SERVICE_HOST", "workspace-manager")
 BROKER_TOKEN = os.getenv("WORKSPACE_BROKER_TOKEN", "")
 EGRESS_NETWORK = os.getenv("WORKSPACE_EGRESS_NETWORK", "inzozi-workspace-egress")
@@ -40,6 +43,7 @@ LABEL_EXPIRES_AT = "com.inzozi.code.expires_at"
 LABEL_NETWORK = "com.inzozi.code.network"
 LABEL_KIND = "com.inzozi.code.kind"
 LABEL_ROLE = "com.inzozi.code.role"
+LABEL_PROJECT_ID = "com.inzozi.code.project_id"
 
 
 docker_client = docker.from_env()
@@ -75,6 +79,13 @@ def _volume_name(workspace_id: str) -> str:
 
 def _network_name(workspace_id: str) -> str:
     return f"inzozi-ws-net-{_workspace_id(workspace_id)}"
+
+
+def _quota_host_path(workspace_id: str) -> str:
+    workspace_id = _workspace_id(workspace_id)
+    if not QUOTA_STORAGE_ROOT.startswith("/") or QUOTA_STORAGE_ROOT == "/":
+        raise RuntimeError("Workspace quota storage root must be a dedicated absolute path")
+    return f"{QUOTA_STORAGE_ROOT}/{workspace_id}"
 
 
 def _broker_container():
@@ -122,13 +133,14 @@ def _require_manager(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Workspace broker accepts requests from the workspace manager only")
 
 
-def _workspace_labels(workspace_id: str, expires_at: int, network_name: str) -> dict[str, str]:
+def _workspace_labels(workspace_id: str, expires_at: int, network_name: str, project_id: int) -> dict[str, str]:
     return {
         LABEL_WORKSPACE: "true",
         LABEL_WORKSPACE_ID: workspace_id,
         LABEL_EXPIRES_AT: str(expires_at),
         LABEL_NETWORK: network_name,
         LABEL_KIND: "runtime",
+        LABEL_PROJECT_ID: str(project_id),
     }
 
 
@@ -199,12 +211,58 @@ def _is_expired(container) -> bool:
     return expires_at <= int(time.time())
 
 
+def _quota_helper_run(action: str, *, workspace_id: str | None = None, limit_bytes: int | None = None) -> dict:
+    if action not in {"check", "setup", "destroy", "probe"}:
+        raise RuntimeError("Unsupported quota helper action")
+    environment: dict[str, str] = {}
+    if workspace_id is not None:
+        environment["WORKSPACE_ID"] = _workspace_id(workspace_id)
+    if limit_bytes is not None:
+        environment["WORKSPACE_DISK_LIMIT_BYTES"] = str(limit_bytes)
+
+    try:
+        output = docker_client.containers.run(
+            image=QUOTA_HELPER_IMAGE,
+            command=[action],
+            environment=environment,
+            volumes={QUOTA_STORAGE_ROOT: {"bind": "/quota-root", "mode": "rw"}},
+            network_mode="none",
+            read_only=True,
+            tmpfs={"/tmp": "rw,noexec,nosuid,nodev,size=67108864"},
+            user="0:0",
+            cap_drop=["ALL"],
+            cap_add=["SYS_ADMIN", "CHOWN"],
+            security_opt=["no-new-privileges:true"],
+            mem_limit="256m",
+            nano_cpus=500_000_000,
+            pids_limit=64,
+            remove=True,
+            stdout=True,
+            stderr=True,
+            labels={LABEL_KIND: "workspace-quota-helper"},
+        )
+    except ContainerError as exc:
+        raise RuntimeError("Workspace XFS quota helper failed safely") from exc
+
+    try:
+        payload = json.loads(output.decode("utf-8").strip().splitlines()[-1])
+    except (ValueError, IndexError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Workspace XFS quota helper returned an invalid result") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("Workspace XFS quota helper returned an invalid result")
+    return payload
+
+
 def _destroy_sync(workspace_id: str) -> None:
     workspace_id = _workspace_id(workspace_id)
+    errors: list[Exception] = []
+
     try:
         docker_client.containers.get(_runtime_name(workspace_id)).remove(force=True)
     except NotFound:
         pass
+    except DockerException as exc:
+        errors.append(exc)
 
     try:
         network = docker_client.networks.get(_network_name(workspace_id))
@@ -215,11 +273,23 @@ def _destroy_sync(workspace_id: str) -> None:
         network.remove()
     except NotFound:
         pass
+    except DockerException as exc:
+        errors.append(exc)
 
     try:
         docker_client.volumes.get(_volume_name(workspace_id)).remove(force=True)
     except NotFound:
         pass
+    except DockerException as exc:
+        errors.append(exc)
+
+    try:
+        _quota_helper_run("destroy", workspace_id=workspace_id)
+    except (DockerException, RuntimeError) as exc:
+        errors.append(exc)
+
+    if errors:
+        raise RuntimeError("Workspace cleanup did not complete safely") from errors[0]
 
 
 def _assert_live_sync(workspace_id: str):
@@ -316,18 +386,35 @@ def _create_workspace_sync(payload: CreateWorkspaceRequest) -> dict:
     except NotFound:
         pass
 
-    docker_client.volumes.create(
-        name=volume_name,
-        labels={LABEL_WORKSPACE: "true", LABEL_WORKSPACE_ID: workspace_id, LABEL_KIND: "volume"},
-    )
-    network = docker_client.networks.create(
-        network_name,
-        driver="bridge",
-        internal=True,
-        labels={LABEL_WORKSPACE: "true", LABEL_WORKSPACE_ID: workspace_id, LABEL_KIND: "runtime-network"},
-    )
+    quota = _quota_helper_run("setup", workspace_id=workspace_id, limit_bytes=DISK_LIMIT_BYTES)
+    try:
+        project_id = int(quota.get("project_id", 0))
+    except (TypeError, ValueError) as exc:
+        _quota_helper_run("destroy", workspace_id=workspace_id)
+        raise RuntimeError("Workspace quota helper did not allocate a valid project id") from exc
+    if project_id <= 0 or quota.get("status") != "quota-ready":
+        _quota_helper_run("destroy", workspace_id=workspace_id)
+        raise RuntimeError("Workspace quota helper did not allocate a valid project id")
 
     try:
+        docker_client.volumes.create(
+            name=volume_name,
+            driver="local",
+            driver_opts={"type": "none", "o": "bind", "device": _quota_host_path(workspace_id)},
+            labels={
+                LABEL_WORKSPACE: "true",
+                LABEL_WORKSPACE_ID: workspace_id,
+                LABEL_KIND: "volume",
+                LABEL_PROJECT_ID: str(project_id),
+            },
+        )
+        network = docker_client.networks.create(
+            network_name,
+            driver="bridge",
+            internal=True,
+            labels={LABEL_WORKSPACE: "true", LABEL_WORKSPACE_ID: workspace_id, LABEL_KIND: "runtime-network"},
+        )
+
         _connect_manager_to(network)
         _helper_run(
             module="app.bootstrap",
@@ -369,10 +456,13 @@ def _create_workspace_sync(payload: CreateWorkspaceRequest) -> dict:
             nano_cpus=RUNTIME_NANO_CPUS,
             pids_limit=RUNTIME_PIDS_LIMIT,
             restart_policy={"Name": "unless-stopped"},
-            labels=_workspace_labels(workspace_id, payload.expires_at, network_name),
+            labels=_workspace_labels(workspace_id, payload.expires_at, network_name, project_id),
         )
     except Exception:
-        _destroy_sync(workspace_id)
+        try:
+            _destroy_sync(workspace_id)
+        except RuntimeError:
+            pass
         raise
 
     return {
@@ -380,6 +470,9 @@ def _create_workspace_sync(payload: CreateWorkspaceRequest) -> dict:
         "status": "provisioned",
         "size_bytes": size_bytes,
         "network_internal": True,
+        "disk_quota": "xfs-project-hard",
+        "disk_limit_bytes": DISK_LIMIT_BYTES,
+        "project_id": project_id,
     }
 
 
@@ -399,7 +492,6 @@ def _push_sync(workspace_id: str, request: PushRequest) -> dict:
         volume_name=_volume_name(workspace_id),
         network_name=EGRESS_NETWORK,
     )
-    import json
 
     try:
         result = json.loads(output.decode("utf-8").strip().splitlines()[-1])
@@ -420,22 +512,28 @@ def _quota_sync(workspace_id: str) -> dict:
         "workspace_id": workspace_id,
         "size_bytes": size_bytes,
         "limit_bytes": DISK_LIMIT_BYTES,
+        "hard_enforced": True,
+        "mode": "xfs-project-hard",
         "exceeded": exceeded,
         "cleaned_up": exceeded,
     }
 
 
 def _isolation_status_sync() -> dict:
+    quota_status = _quota_helper_run("check")
     containers = _active_containers()
     workspaces: list[dict] = []
     socket_mounts = 0
     network_names: set[str] = set()
+    project_ids: set[str] = set()
     all_networks_internal = True
+    all_hard_quotas = True
     for container in containers:
         container.reload()
         labels = container.labels or {}
         workspace_id = labels.get(LABEL_WORKSPACE_ID, "")
         network_name = labels.get(LABEL_NETWORK, "")
+        project_id = labels.get(LABEL_PROJECT_ID, "")
         mounts = container.attrs.get("Mounts") or []
         if any(
             mount.get("Source") == "/var/run/docker.sock" or mount.get("Destination") == "/var/run/docker.sock"
@@ -451,6 +549,10 @@ def _isolation_status_sync() -> dict:
             except NotFound:
                 network_internal = False
         all_networks_internal = all_networks_internal and network_internal
+        quota_bound = project_id.isdigit() and int(project_id) > 0
+        all_hard_quotas = all_hard_quotas and quota_bound
+        if quota_bound:
+            project_ids.add(project_id)
         workspaces.append(
             {
                 "workspace_id": workspace_id,
@@ -458,6 +560,8 @@ def _isolation_status_sync() -> dict:
                 "network": network_name,
                 "network_internal": network_internal,
                 "expires_at": labels.get(LABEL_EXPIRES_AT),
+                "disk_quota": "xfs-project-hard" if quota_bound else "missing",
+                "project_id": project_id or None,
             }
         )
     return {
@@ -470,6 +574,11 @@ def _isolation_status_sync() -> dict:
         "runtime_egress": "denied",
         "git_helper_egress": "ephemeral-github-actions-only",
         "disk_quota_bytes": DISK_LIMIT_BYTES,
+        "disk_quota_mode": "xfs-project-hard",
+        "quota_filesystem": quota_status.get("filesystem"),
+        "quota_project_enforcement": quota_status.get("project_quota") is True,
+        "all_active_workspaces_hard_quoted": all_hard_quotas,
+        "unique_active_project_ids": len(project_ids) == len(workspaces),
         "max_active_workspaces": MAX_ACTIVE,
         "workspaces": workspaces,
     }
@@ -484,7 +593,7 @@ async def _janitor() -> None:
                 if WORKSPACE_ID_RE.fullmatch(workspace_id):
                     try:
                         await asyncio.to_thread(_destroy_sync, workspace_id)
-                    except DockerException:
+                    except (DockerException, RuntimeError):
                         pass
 
 
@@ -495,10 +604,12 @@ async def lifespan(_: FastAPI):
     try:
         docker_client.ping()
         docker_client.images.get(RUNTIME_IMAGE)
+        docker_client.images.get(QUOTA_HELPER_IMAGE)
         _ensure_egress_network()
+        _quota_helper_run("check")
         _recover_workspace_networks()
-    except DockerException as exc:
-        raise RuntimeError("Workspace broker cannot initialize Docker control") from exc
+    except (DockerException, RuntimeError) as exc:
+        raise RuntimeError("Workspace broker cannot initialize hardened Docker/quota control") from exc
     janitor = asyncio.create_task(_janitor())
     try:
         yield
@@ -512,8 +623,8 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Inzozi Code Workspace Broker",
-    version="0.1.0",
-    description="Narrow privileged Docker broker for fixed workspace lifecycle operations",
+    version="0.2.0",
+    description="Narrow privileged Docker broker with XFS project quotas for fixed workspace lifecycle operations",
     lifespan=lifespan,
 )
 
@@ -523,10 +634,16 @@ def health() -> dict:
     try:
         docker_client.ping()
         docker_client.images.get(RUNTIME_IMAGE)
+        docker_client.images.get(QUOTA_HELPER_IMAGE)
         _ensure_egress_network()
     except (DockerException, RuntimeError) as exc:
         raise HTTPException(status_code=503, detail="Workspace broker is not ready") from exc
-    return {"status": "ok", "service": "workspace-broker", "docker_control": "broker-only"}
+    return {
+        "status": "ok",
+        "service": "workspace-broker",
+        "docker_control": "broker-only",
+        "disk_quota": "xfs-project-hard",
+    }
 
 
 @app.get("/v1/isolation/status")
@@ -575,6 +692,8 @@ def destroy_workspace(workspace_id: str, request: Request) -> None:
     _require_manager(request)
     try:
         _workspace_id(workspace_id)
+        _destroy_sync(workspace_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid workspace id") from exc
-    _destroy_sync(workspace_id)
+    except (DockerException, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail="Workspace cleanup failed closed") from exc
