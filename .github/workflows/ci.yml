@@ -36,11 +36,13 @@ jobs:
           bash -n infrastructure/staging/bootstrap-host.sh
           bash -n infrastructure/staging/deploy-staging.sh
           bash -n infrastructure/staging/github-app-preflight.sh
+          bash -n infrastructure/staging/auth-preflight.sh
           bash -n infrastructure/hetzner/prepare-local.sh
           bash -n infrastructure/hetzner/up.sh
           bash -n infrastructure/hetzner/bootstrap.sh
           bash -n infrastructure/hetzner/configure-github-app.sh
           bash -n infrastructure/hetzner/resolve-github-installation-id.sh
+          bash -n infrastructure/hetzner/configure-staging-auth.sh
           bash -n infrastructure/hetzner/down.sh
       - name: Validate Hetzner Terraform
         working-directory: infrastructure/hetzner
@@ -54,6 +56,10 @@ jobs:
           REDIS_URL: redis://redis:6379/0
           POSTGRES_PASSWORD: test-only
           GITHUB_APP_PRIVATE_KEY_HOST_PATH: /tmp/inzozi-ci-github-app.pem
+          AUTH_ENABLED: "true"
+          AUTH_BOOTSTRAP_EMAIL: ci@inzozidigital.com
+          AUTH_PASSWORD_HASH: pbkdf2_sha256$600000$test$test
+          AUTH_SESSION_SECRET: ci-only-session-secret-00000000000000000000000000000000
         run: |
           touch /tmp/inzozi-ci-github-app.pem
           docker compose \
