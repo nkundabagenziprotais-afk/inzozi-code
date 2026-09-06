@@ -16,6 +16,14 @@ def _validated_repo(path: Path) -> Path:
     git_dir = path / ".git"
     if git_dir.is_symlink() or not git_dir.is_dir():
         raise RuntimeError("Workspace Git metadata is unavailable or symlinked")
+    refs_heads = git_dir / "refs" / "heads"
+    if refs_heads.is_symlink() or not refs_heads.is_dir():
+        raise RuntimeError("Workspace Git branch metadata is unavailable or symlinked")
+    required_mode = os.R_OK | os.W_OK | os.X_OK
+    if not os.access(path, required_mode):
+        raise RuntimeError("Workspace repository is not writable by the runtime user")
+    if not os.access(git_dir, required_mode) or not os.access(refs_heads, required_mode):
+        raise RuntimeError("Workspace Git metadata is not writable by the runtime user")
     return path.resolve(strict=True)
 
 
