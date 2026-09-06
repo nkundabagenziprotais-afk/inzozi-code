@@ -8,6 +8,8 @@ import re
 import subprocess
 import sys
 
+from app.git_credentials import github_git_environment
+
 GITHUB_HTTPS_RE = re.compile(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$")
 REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,159}$")
 ROOT = Path("/workspace")
@@ -44,39 +46,26 @@ def main() -> int:
         return 2
 
     ROOT.mkdir(parents=True, exist_ok=True)
-    askpass = Path("/tmp/inzozi-git-askpass")
     env = os.environ.copy()
-    env.update({"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS_REQUIRE": "force", "HOME": "/tmp"})
+    env.update({"GIT_TERMINAL_PROMPT": "0", "HOME": "/tmp"})
     if token:
-        askpass.write_text(
-            "#!/bin/sh\n"
-            "case \"$1\" in\n"
-            "  *Username*) printf '%s\\n' 'x-access-token' ;;\n"
-            "  *) printf '%s\\n' \"$WORKSPACE_GIT_TOKEN\" ;;\n"
-            "esac\n",
-            encoding="utf-8",
-        )
-        askpass.chmod(0o700)
-        env["GIT_ASKPASS"] = str(askpass)
+        env = github_git_environment(token)
 
     command = ["git", "-c", "credential.helper=", "clone", "--depth", "1", "--no-tags"]
     if ref:
         command += ["--branch", ref]
     command += [repository_url, str(REPO)]
 
-    try:
-        result = subprocess.run(
-            command,
-            cwd=ROOT,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=180,
-            check=False,
-        )
-    finally:
-        askpass.unlink(missing_ok=True)
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=180,
+        check=False,
+    )
 
     if result.returncode != 0:
         print("Repository clone failed safely", file=sys.stderr)

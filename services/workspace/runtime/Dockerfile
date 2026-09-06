@@ -12,6 +12,7 @@ WORKDIR /runtime
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir .
 COPY app ./app
+RUN chmod 0555 /runtime/app/git_askpass.sh
 
 RUN useradd --create-home --uid 10002 workspace \
     && mkdir -p /workspaces \

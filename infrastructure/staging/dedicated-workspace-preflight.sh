@@ -5,6 +5,7 @@ APP_ROOT="${APP_ROOT:-/srv/inzozi-code/application}"
 ENV_FILE="${ENV_FILE:-/srv/inzozi-code/.env.staging}"
 STAGING_COMPOSE="${APP_ROOT}/infrastructure/staging/docker-compose.staging.yml"
 RUNTIME_IMAGE="${WORKSPACE_RUNTIME_IMAGE:-inzozi-code-workspace-runtime:local}"
+HELPER_NETWORK="${WORKSPACE_EGRESS_NETWORK:-inzozi-workspace-egress}"
 
 cd "${APP_ROOT}"
 COMPOSE=(docker compose --env-file "${ENV_FILE}" -f docker-compose.yml -f "${STAGING_COMPOSE}")
@@ -75,6 +76,29 @@ if [[ "${probe_rc}" -eq 0 ]]; then
 fi
 
 echo "Runtime egress-deny probe passed: isolated workspace networks cannot reach github.com."
+
+helper_internal="$(docker network inspect "${HELPER_NETWORK}" --format '{{.Internal}}')"
+if [[ "${helper_internal}" != "false" ]]; then
+  echo "Workspace helper egress network must not be internal." >&2
+  exit 1
+fi
+
+if ! docker run --rm \
+  --network "${HELPER_NETWORK}" \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=134217728 \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --memory 128m \
+  --pids-limit 32 \
+  "${RUNTIME_IMAGE}" \
+  python -c 'import urllib.request; response=urllib.request.urlopen("https://github.com", timeout=5); raise SystemExit(0 if response.status == 200 else 1)' \
+  >/dev/null 2>&1; then
+  echo "Workspace helper egress network cannot reach GitHub." >&2
+  exit 1
+fi
+
+echo "GitHub helper egress probe passed."
 
 if docker ps --format '{{.Names}}' | grep -Eq '^application-workspace-1$'; then
   echo "Legacy shared workspace container is still running." >&2

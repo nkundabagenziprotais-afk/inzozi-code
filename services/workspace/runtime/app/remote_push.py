@@ -7,6 +7,8 @@ import re
 import subprocess
 import sys
 
+from app.git_credentials import github_git_environment
+
 GITHUB_HTTPS_RE = re.compile(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$")
 SAFE_BRANCH_RE = re.compile(r"^(feature|fix|ui|hotfix|deploy)/[a-z0-9][a-z0-9._-]{2,80}$")
 HEAD_RE = re.compile(r"^[0-9a-f]{40,64}$")
@@ -60,48 +62,27 @@ def main() -> int:
         print("Local Git state changed after approval", file=sys.stderr)
         return 3
 
-    askpass = Path("/tmp/inzozi-git-askpass")
-    askpass.write_text(
-        "#!/bin/sh\n"
-        "case \"$1\" in\n"
-        "  *Username*) printf '%s\\n' 'x-access-token' ;;\n"
-        "  *) printf '%s\\n' \"$WORKSPACE_GIT_TOKEN\" ;;\n"
-        "esac\n",
-        encoding="utf-8",
+    env = github_git_environment(token)
+    result = subprocess.run(
+        [
+            "git",
+            "-c",
+            "credential.helper=",
+            "-c",
+            f"remote.origin.url={repository_url}",
+            "push",
+            "--porcelain",
+            "origin",
+            f"HEAD:refs/heads/{branch}",
+        ],
+        cwd=REPO,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=120,
+        check=False,
     )
-    askpass.chmod(0o700)
-    env = os.environ.copy()
-    env.update(
-        {
-            "GIT_TERMINAL_PROMPT": "0",
-            "GIT_ASKPASS_REQUIRE": "force",
-            "GIT_ASKPASS": str(askpass),
-            "HOME": "/tmp",
-        }
-    )
-    try:
-        result = subprocess.run(
-            [
-                "git",
-                "-c",
-                "credential.helper=",
-                "-c",
-                f"remote.origin.url={repository_url}",
-                "push",
-                "--porcelain",
-                "origin",
-                f"HEAD:refs/heads/{branch}",
-            ],
-            cwd=REPO,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=120,
-            check=False,
-        )
-    finally:
-        askpass.unlink(missing_ok=True)
 
     if result.returncode != 0:
         print("Remote push failed safely", file=sys.stderr)
