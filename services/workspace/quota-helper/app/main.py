@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import ctypes
 import errno
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import secrets
 import shutil
@@ -20,6 +22,65 @@ MIN_PROJECT_ID = 10_000
 MAX_PROJECT_ID = 2_000_000_000
 PROJECT_QUOTA_FAILURE_ERRNO = errno.ENOSPC
 PROJECT_QUOTA_FAILURE_ERRNO_NAME = "ENOSPC"
+
+# Linux/XFS UAPI constants from linux/dqblk_xfs.h and sys/quota.h.
+XQM_PRJQUOTA = 2
+Q_XGETQUOTA = (ord("X") << 8) + 3
+Q_XSETQLIM = (ord("X") << 8) + 4
+FS_DQUOT_VERSION = 1
+FS_PROJ_QUOTA = 1 << 1
+FS_DQ_BSOFT = 1 << 2
+FS_DQ_BHARD = 1 << 3
+FS_DQ_BLOCK_LIMITS = FS_DQ_BSOFT | FS_DQ_BHARD
+BASIC_BLOCK_BYTES = 512
+
+# Staging is amd64. x86_64 uses the asm-generic quotactl_fd syscall number.
+SYS_QUOTACTL_FD_X86_64 = 443
+
+
+def _qcmd(command: int, quota_type: int) -> int:
+    return (command << 8) | (quota_type & 0xFF)
+
+
+Q_XGETQUOTA_PROJECT = _qcmd(Q_XGETQUOTA, XQM_PRJQUOTA)
+Q_XSETQLIM_PROJECT = _qcmd(Q_XSETQLIM, XQM_PRJQUOTA)
+
+
+class FsDiskQuota(ctypes.Structure):
+    """ABI-compatible fs_disk_quota from linux/dqblk_xfs.h."""
+
+    _fields_ = [
+        ("d_version", ctypes.c_int8),
+        ("d_flags", ctypes.c_int8),
+        ("d_fieldmask", ctypes.c_uint16),
+        ("d_id", ctypes.c_uint32),
+        ("d_blk_hardlimit", ctypes.c_uint64),
+        ("d_blk_softlimit", ctypes.c_uint64),
+        ("d_ino_hardlimit", ctypes.c_uint64),
+        ("d_ino_softlimit", ctypes.c_uint64),
+        ("d_bcount", ctypes.c_uint64),
+        ("d_icount", ctypes.c_uint64),
+        ("d_itimer", ctypes.c_int32),
+        ("d_btimer", ctypes.c_int32),
+        ("d_iwarns", ctypes.c_uint16),
+        ("d_bwarns", ctypes.c_uint16),
+        ("d_itimer_hi", ctypes.c_int8),
+        ("d_btimer_hi", ctypes.c_int8),
+        ("d_rtbtimer_hi", ctypes.c_int8),
+        ("d_padding2", ctypes.c_int8),
+        ("d_rtb_hardlimit", ctypes.c_uint64),
+        ("d_rtb_softlimit", ctypes.c_uint64),
+        ("d_rtbcount", ctypes.c_uint64),
+        ("d_rtbtimer", ctypes.c_int32),
+        ("d_rtbwarns", ctypes.c_uint16),
+        ("d_padding3", ctypes.c_int16),
+        ("d_padding4", ctypes.c_char * 8),
+    ]
+
+
+_LIBC = ctypes.CDLL(None, use_errno=True)
+_SYSCALL = _LIBC.syscall
+_SYSCALL.restype = ctypes.c_long
 
 
 def _emit(payload: dict) -> None:
@@ -130,23 +191,71 @@ def _set_project(path: Path, project_id: int) -> None:
         raise RuntimeError("XFS project inheritance verification failed")
 
 
+def _quota_basic_blocks(limit_bytes: int) -> int:
+    return (limit_bytes + BASIC_BLOCK_BYTES - 1) // BASIC_BLOCK_BYTES
+
+
+def _quota_record(project_id: int, limit_bytes: int) -> FsDiskQuota:
+    record = FsDiskQuota()
+    record.d_version = FS_DQUOT_VERSION
+    record.d_flags = FS_PROJ_QUOTA
+    record.d_fieldmask = FS_DQ_BLOCK_LIMITS
+    record.d_id = project_id
+    blocks = _quota_basic_blocks(limit_bytes)
+    record.d_blk_softlimit = blocks
+    record.d_blk_hardlimit = blocks
+    return record
+
+
+def _require_quotactl_fd_arch() -> None:
+    if platform.machine().lower() not in {"x86_64", "amd64"}:
+        raise RuntimeError("Workspace quota helper supports quotactl_fd on amd64 staging only")
+
+
+def _quotactl_fd(operation: int, project_id: int, record: FsDiskQuota) -> None:
+    _require_quotactl_fd_arch()
+    flags = getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_DIRECTORY", 0)
+    fd = os.open(ROOT, flags)
+    try:
+        ctypes.set_errno(0)
+        result = _SYSCALL(
+            SYS_QUOTACTL_FD_X86_64,
+            fd,
+            operation,
+            project_id,
+            ctypes.byref(record),
+        )
+        if result != 0:
+            error_number = ctypes.get_errno()
+            error_name = errno.errorcode.get(error_number, "UNKNOWN")
+            raise RuntimeError(
+                f"XFS project quota syscall failed with errno {error_number} ({error_name})"
+            )
+    finally:
+        os.close(fd)
+
+
+def _read_limit(project_id: int) -> FsDiskQuota:
+    record = FsDiskQuota()
+    record.d_version = FS_DQUOT_VERSION
+    record.d_flags = FS_PROJ_QUOTA
+    record.d_id = project_id
+    _quotactl_fd(Q_XGETQUOTA_PROJECT, project_id, record)
+    return record
+
+
 def _set_limit(project_id: int, limit_bytes: int) -> None:
-    limit_kib = (limit_bytes + 1023) // 1024
-    _run(
-        [
-            "setquota",
-            "-P",
-            "-F",
-            "xfs",
-            str(project_id),
-            str(limit_kib),
-            str(limit_kib),
-            "0",
-            "0",
-            str(ROOT),
-        ],
-        "Unable to apply XFS project hard quota",
-    )
+    expected_blocks = _quota_basic_blocks(limit_bytes)
+    record = _quota_record(project_id, limit_bytes)
+    _quotactl_fd(Q_XSETQLIM_PROJECT, project_id, record)
+
+    observed = _read_limit(project_id)
+    if observed.d_id != project_id:
+        raise RuntimeError("XFS project quota id read-back verification failed")
+    if not (observed.d_flags & FS_PROJ_QUOTA):
+        raise RuntimeError("XFS project quota type read-back verification failed")
+    if observed.d_blk_hardlimit != expected_blocks or observed.d_blk_softlimit != expected_blocks:
+        raise RuntimeError("XFS project quota hard-limit read-back verification failed")
 
 
 def _candidate_project_ids(workspace_id: str):
@@ -179,12 +288,11 @@ def _allocate_project_id(workspace_id: str) -> int:
 
 
 def _clear_limit(project_id: int) -> None:
+    record = _quota_record(project_id, 0)
     try:
-        _run(
-            ["setquota", "-P", "-F", "xfs", str(project_id), "0", "0", "0", "0", str(ROOT)],
-            "Unable to clear XFS project quota",
-        )
+        _quotactl_fd(Q_XSETQLIM_PROJECT, project_id, record)
     except RuntimeError:
+        # Cleanup is best effort here; the path and registry marker are still removed.
         pass
 
 
@@ -204,6 +312,7 @@ def _reclaim_tree_for_removal(path: Path) -> None:
 
 def _setup(workspace_id: str, limit_bytes: int) -> dict:
     _mount_status()
+    _require_quotactl_fd_arch()
     REGISTRY.mkdir(mode=0o700, parents=True, exist_ok=True)
     LOCK_FILE.touch(mode=0o600, exist_ok=True)
 
@@ -222,8 +331,8 @@ def _setup(workspace_id: str, limit_bytes: int) -> dict:
             marker.write_text(f"{project_id}\n", encoding="ascii")
             os.chmod(marker, 0o600)
         except Exception:
-            shutil.rmtree(path, ignore_errors=True)
             _clear_limit(project_id)
+            shutil.rmtree(path, ignore_errors=True)
             marker.unlink(missing_ok=True)
             raise
         finally:
@@ -234,6 +343,7 @@ def _setup(workspace_id: str, limit_bytes: int) -> dict:
         "workspace_id": workspace_id,
         "project_id": project_id,
         "limit_bytes": limit_bytes,
+        "quota_api": "quotactl-fd-xfs",
     }
 
 
@@ -268,10 +378,12 @@ def _destroy(workspace_id: str) -> dict:
 
 def _check() -> dict:
     status = _mount_status()
+    _require_quotactl_fd_arch()
     return {
         "status": "ok",
         "filesystem": status["filesystem"],
         "project_quota": True,
+        "quota_api": "quotactl-fd-xfs",
         "quota_root": str(ROOT),
     }
 
@@ -304,6 +416,7 @@ def _probe() -> dict:
                 "hard_limit_enforced": True,
                 "failure_errno": PROJECT_QUOTA_FAILURE_ERRNO_NAME,
                 "probe_limit_bytes": limit_bytes,
+                "quota_api": "quotactl-fd-xfs",
             }
         finally:
             os.close(fd)
