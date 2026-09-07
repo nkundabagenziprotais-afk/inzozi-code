@@ -7,8 +7,8 @@ WORKDIR /proxy
 
 COPY app ./app
 
-RUN useradd --create-home --uid 10004 proxy
+RUN useradd --create-home --uid 10004 --user-group inzoziproxy
 
-USER 10004:10004
+USER 10004
 
 CMD ["python", "-m", "app.proxy"]
