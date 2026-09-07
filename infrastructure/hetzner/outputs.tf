@@ -18,6 +18,21 @@ output "ipv6_address" {
   value       = hcloud_server.staging.ipv6_address
 }
 
+output "workspace_quota_volume_id" {
+  description = "Hetzner volume ID used for XFS project-quota workspace storage."
+  value       = hcloud_volume.workspace_quota.id
+}
+
+output "workspace_quota_volume_device" {
+  description = "Linux device path for the XFS workspace quota volume."
+  value       = hcloud_volume.workspace_quota.linux_device
+}
+
+output "workspace_quota_volume_size_gb" {
+  description = "Physical workspace quota pool size in GB."
+  value       = hcloud_volume.workspace_quota.size
+}
+
 output "ssh_command" {
   description = "Convenience SSH command. The private key remains operator-owned and is never stored in Terraform."
   value       = "ssh ${var.admin_user}@${hcloud_server.staging.ipv4_address}"

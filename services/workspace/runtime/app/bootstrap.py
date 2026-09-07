@@ -16,16 +16,46 @@ ROOT = Path("/workspace")
 REPO = ROOT / "repo"
 
 
+def _raise_walk_error(exc: OSError) -> None:
+    raise RuntimeError("Workspace ownership traversal failed") from exc
+
+
+def _set_owner(path: Path, uid: int, gid: int) -> None:
+    os.chown(path, uid, gid, follow_symlinks=False)
+    stat = path.lstat()
+    if stat.st_uid != uid or stat.st_gid != gid:
+        raise RuntimeError("Workspace ownership verification failed")
+
+
 def _chown_tree(root: Path, uid: int, gid: int) -> None:
-    os.chown(root, uid, gid, follow_symlinks=False)
-    for current, dirs, files in os.walk(root, followlinks=False):
+    if root.is_symlink() or not root.is_dir():
+        raise RuntimeError("Workspace root is unavailable or symlinked")
+
+    # The bootstrap helper deliberately has CAP_CHOWN but not DAC_OVERRIDE.
+    # The quota-backed root starts as root:root mode 0700, so changing the
+    # root owner before walking descendants makes the helper lose traversal.
+    # Walk bottom-up and transfer the root itself last.
+    for current, dirs, files in os.walk(
+        root,
+        topdown=False,
+        followlinks=False,
+        onerror=_raise_walk_error,
+    ):
         base = Path(current)
-        for name in dirs + files:
+        for name in files:
             path = base / name
             try:
-                os.chown(path, uid, gid, follow_symlinks=False)
+                _set_owner(path, uid, gid)
             except FileNotFoundError:
                 continue
+        for name in dirs:
+            path = base / name
+            try:
+                _set_owner(path, uid, gid)
+            except FileNotFoundError:
+                continue
+
+    _set_owner(root, uid, gid)
 
 
 def main() -> int:
@@ -78,7 +108,11 @@ def main() -> int:
         "bootstrap_authenticated": bool(token),
     }
     (ROOT / "workspace.json").write_text(json.dumps(metadata), encoding="utf-8")
-    _chown_tree(ROOT, uid, gid)
+    try:
+        _chown_tree(ROOT, uid, gid)
+    except (OSError, RuntimeError) as exc:
+        print(f"Workspace ownership normalization failed: {exc}", file=sys.stderr)
+        return 4
     print("bootstrap-ready")
     return 0
 

@@ -91,3 +91,14 @@ resource "hcloud_server" "staging" {
     ipv6_enabled = true
   }
 }
+
+resource "hcloud_volume" "workspace_quota" {
+  name      = "${var.name}-workspace-quota"
+  size      = var.workspace_quota_volume_size_gb
+  server_id = hcloud_server.staging.id
+  automount = false
+  format    = "xfs"
+  labels = merge(local.common_labels, {
+    purpose = "workspace-quota"
+  })
+}

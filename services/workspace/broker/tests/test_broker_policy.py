@@ -8,6 +8,8 @@ from app.main import (
     _helper_run,
     _is_expired,
     _network_name,
+    _quota_helper_run,
+    _quota_host_path,
     _runtime_name,
     _volume_name,
     _workspace_id,
@@ -24,11 +26,14 @@ def test_workspace_resource_names_are_id_scoped():
     assert _runtime_name(workspace_id) == f"inzozi-ws-{workspace_id}"
     assert _volume_name(workspace_id) == f"inzozi-ws-vol-{workspace_id}"
     assert _network_name(workspace_id) == f"inzozi-ws-net-{workspace_id}"
+    assert _quota_host_path(workspace_id).endswith(f"/{workspace_id}")
 
 
 def test_invalid_workspace_id_is_rejected():
     with pytest.raises(ValueError):
         _workspace_id("../../docker.sock")
+    with pytest.raises(ValueError):
+        _quota_host_path("../../escape")
 
 
 def test_ttl_expiry_is_fail_closed():
@@ -61,3 +66,8 @@ def test_broker_does_not_accept_arbitrary_helper_modules():
             volume_name="inzozi-ws-vol-" + "a" * 32,
             network_name=None,
         )
+
+
+def test_broker_does_not_accept_arbitrary_quota_actions():
+    with pytest.raises(RuntimeError, match="Unsupported quota helper action"):
+        _quota_helper_run("shell", workspace_id="a" * 32)
