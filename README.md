@@ -51,3 +51,4 @@ Then open:
 - AI-generated commands must execute inside isolated workspaces, never directly on the host.
 
 See `docs/architecture.md` and `docs/v0.1-acceptance.md`.
+<!-- Issue20 restricted helper egress E2E: b0fcad8724be448cbed3f78d9c1a04e1 -->
