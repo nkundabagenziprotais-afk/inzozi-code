@@ -24,6 +24,7 @@ jobs:
           python -m compileall services/workspace/manager/app
           python -m compileall services/workspace/broker/app
           python -m compileall services/workspace/quota-helper/app
+          python -m compileall services/workspace/egress-proxy/app
       - name: Test API integrations
         working-directory: apps/api
         run: |
@@ -44,6 +45,16 @@ jobs:
         run: |
           python -m pip install -e '.[dev]'
           pytest -q
+      - name: Test workspace egress proxy policy
+        working-directory: services/workspace/egress-proxy
+        run: |
+          python -m pip install -e '.[dev]'
+          pytest -q
+      - name: Build workspace egress proxy image
+        run: |
+          docker build \
+            --tag inzozi-code-workspace-egress-proxy:ci \
+            services/workspace/egress-proxy
       - name: Test workspace quota helper policy
         working-directory: services/workspace/quota-helper
         run: |

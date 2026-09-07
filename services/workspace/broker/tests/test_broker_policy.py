@@ -3,6 +3,8 @@ import time
 import pytest
 
 from app.main import (
+    EGRESS_NETWORK,
+    EGRESS_PROXY_URL,
     GITHUB_HTTPS_RE,
     SAFE_PUSH_BRANCH_RE,
     _helper_run,
@@ -71,3 +73,56 @@ def test_broker_does_not_accept_arbitrary_helper_modules():
 def test_broker_does_not_accept_arbitrary_quota_actions():
     with pytest.raises(RuntimeError, match="Unsupported quota helper action"):
         _quota_helper_run("shell", workspace_id="a" * 32)
+
+
+
+def test_broker_rejects_arbitrary_helper_networks():
+    with pytest.raises(
+        RuntimeError,
+        match="Unsupported workspace helper network",
+    ):
+        _helper_run(
+            module="app.bootstrap",
+            environment={},
+            volume_name="inzozi-ws-vol-" + "a" * 32,
+            network_name="bridge",
+        )
+
+
+def test_github_helpers_receive_fixed_proxy_environment(
+    monkeypatch,
+):
+    import app.main as broker_main
+
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return b"ok"
+
+    monkeypatch.setattr(
+        broker_main.docker_client.containers,
+        "run",
+        fake_run,
+    )
+
+    result = _helper_run(
+        module="app.remote_push",
+        environment={
+            "WORKSPACE_BRANCH": "fix/example",
+            "HTTPS_PROXY": "http://attacker.invalid:9999",
+        },
+        volume_name="inzozi-ws-vol-" + "a" * 32,
+        network_name=EGRESS_NETWORK,
+    )
+
+    assert result == b"ok"
+
+    env = captured["environment"]
+
+    assert env["HTTPS_PROXY"] == EGRESS_PROXY_URL
+    assert env["https_proxy"] == EGRESS_PROXY_URL
+    assert env["HTTP_PROXY"] == EGRESS_PROXY_URL
+    assert env["http_proxy"] == EGRESS_PROXY_URL
+    assert env["NO_PROXY"] == ""
+    assert env["no_proxy"] == ""
