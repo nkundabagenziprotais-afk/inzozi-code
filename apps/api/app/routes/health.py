@@ -13,5 +13,6 @@ def health() -> dict:
         "service": settings.app_name,
         "environment": settings.app_env,
         "aquila_provider": settings.aquila_provider,
+        "auth_enabled": settings.auth_enabled,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

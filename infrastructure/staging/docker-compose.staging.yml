@@ -2,6 +2,21 @@ services:
   api:
     environment:
       APP_ENV: staging
+      WORKSPACE_SERVICE_URL: http://workspace-manager:8200
+      WORKSPACE_OWNERSHIP_ENFORCED: "true"
       GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app.pem
     volumes:
       - "${GITHUB_APP_PRIVATE_KEY_HOST_PATH:?Set GITHUB_APP_PRIVATE_KEY_HOST_PATH}:/run/secrets/github-app.pem:ro"
+
+  workspace-manager:
+    environment:
+      WORKSPACE_BROKER_TOKEN: ${WORKSPACE_BROKER_TOKEN:?Set WORKSPACE_BROKER_TOKEN}
+      WORKSPACE_TTL_SECONDS: ${WORKSPACE_TTL_SECONDS:-28800}
+
+  workspace-broker:
+    environment:
+      WORKSPACE_BROKER_TOKEN: ${WORKSPACE_BROKER_TOKEN:?Set WORKSPACE_BROKER_TOKEN}
+      WORKSPACE_MAX_ACTIVE: ${WORKSPACE_MAX_ACTIVE:-8}
+      WORKSPACE_DISK_LIMIT_BYTES: ${WORKSPACE_DISK_LIMIT_BYTES:-2147483648}
+      WORKSPACE_QUOTA_STORAGE_ROOT: ${WORKSPACE_QUOTA_STORAGE_ROOT:-/srv/inzozi-code/workspace-data}
+      WORKSPACE_QUOTA_HELPER_IMAGE: ${WORKSPACE_QUOTA_HELPER_IMAGE:-inzozi-code-workspace-quota-helper:local}
