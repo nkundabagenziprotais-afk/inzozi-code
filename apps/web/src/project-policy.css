@@ -1,0 +1,61 @@
+.routing-policy {
+  border-bottom: 1px solid var(--border);
+  background: #0f1516;
+  padding: 0 10px;
+}
+.routing-policy summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 9px 0;
+  color: #9ba7a3;
+  font-size: 10px;
+  letter-spacing: .04em;
+}
+.routing-policy summary::-webkit-details-marker { display: none; }
+.routing-policy summary::before {
+  content: '›';
+  display: inline-block;
+  margin-right: 7px;
+  color: var(--accent);
+  transition: transform .15s ease;
+}
+.routing-policy[open] summary::before { transform: rotate(90deg); }
+.routing-policy-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding-bottom: 8px;
+}
+.routing-policy label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #788582;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.routing-policy select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #111718;
+  color: #cbd3d0;
+  padding: 6px 5px;
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: normal;
+  outline: none;
+}
+.routing-policy select:focus { border-color: #4c7566; }
+.routing-policy > small {
+  display: block;
+  padding: 0 0 10px;
+  color: #687572;
+  font-size: 9px;
+  line-height: 1.45;
+}
+@media (max-width: 430px) {
+  .routing-policy-grid { grid-template-columns: 1fr; }
+}
