@@ -1,0 +1,15 @@
+[project]
+name = "inzozi-code-workspace-runtime"
+version = "0.1.1"
+description = "Guarded execution boundary for Inzozi Code project workspaces"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "uvicorn[standard]>=0.35,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.4,<9", "httpx>=0.28,<1"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

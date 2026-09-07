@@ -1,0 +1,23 @@
+[project]
+name = "inzozi-code-api"
+version = "0.1.3"
+description = "Inzozi Code API and Aquila orchestration runtime"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "uvicorn[standard]>=0.35,<1",
+  "pydantic-settings>=2.10,<3",
+  "httpx>=0.28,<1",
+  "PyJWT[crypto]>=2.10,<3",
+  "psycopg[binary]>=3.2,<4",
+  "openai-agents>=0.22,<0.23",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4,<9",
+  "httpx>=0.28,<1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
