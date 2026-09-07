@@ -7,9 +7,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
-from app.routes.auth import _FAILED_LOGINS, router as auth_router
+from app.routes.auth import router as auth_router
 from app.routes import workspace as workspace_routes
 from app.security.auth import AuthMiddleware, AuthPrincipal, ROLE_PERMISSIONS, hash_password
+from app.security.redis_controls import configure_auth_state_client
 from app.security.workspace_ownership import (
     WorkspaceOwnership,
     list_accessible_active_workspaces,
@@ -17,6 +18,7 @@ from app.security.workspace_ownership import (
     workspace_namespace,
 )
 from app.security.workspace_scope import WorkspaceOwnershipMiddleware
+from tests.fake_redis import FakeAsyncRedis
 
 OWN_ID = "ee69efc608044cf2b69da605c47f1e7a"
 OTHER_OWNER_ID = "58e1358ec63a4547a6ae81e803cae498"
@@ -35,7 +37,7 @@ def _configure(monkeypatch, *, role: str = "developer", email: str = "developer@
     monkeypatch.setenv("AUTH_COOKIE_SECURE", "false")
     monkeypatch.setenv("WORKSPACE_OWNERSHIP_ENFORCED", "true")
     get_settings.cache_clear()
-    _FAILED_LOGINS.clear()
+    configure_auth_state_client(FakeAsyncRedis())
 
 
 def _ownership(

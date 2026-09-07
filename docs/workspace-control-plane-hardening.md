@@ -75,12 +75,13 @@ The existing ownership/auth/GitHub App preflights must also remain green, follow
 
 This branch removes the raw socket from the manager, but does not by itself approve public staging.
 
-Two material risks remain:
+Material remaining risks:
 
-1. Workspace disk enforcement is still an application-level measurement after guarded actions. It is not a kernel/filesystem project quota, so a pathological single action could consume host disk before the post-action check.
-2. The GitHub helper network still has general outbound connectivity even though helper code accepts GitHub HTTPS repositories only. A dedicated egress proxy or host network policy should constrain that path before public/team staging.
-
-Durable Redis-backed session/rate controls and escape/exhaustion testing from issue #20 also remain required.
+1. Workspace disk enforcement history is now XFS project hard quotas on the dedicated path; keep verifying ENOSPC semantics in staging preflight.
+2. Restricted GitHub helper egress via connect-proxy is complete for the dedicated helper path.
+3. Durable Redis-backed login throttling and server-side session registry/revocation are required for Issue #20 and land in the Redis security slice.
+4. Escape/exhaustion testing remains required.
+5. HTTPS and `AUTH_COOKIE_SECURE=true` hardening remain required before any public staging.
 
 ## Still disabled
 

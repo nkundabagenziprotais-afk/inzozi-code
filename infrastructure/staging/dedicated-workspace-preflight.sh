@@ -299,4 +299,141 @@ if docker ps --format '{{.Names}}' | grep -Eq '^application-workspace-1$'; then
 fi
 
 echo "Legacy shared workspace runtime is absent."
-echo "Dedicated workspace preflight passed. Public staging remains disabled pending helper-egress allowlisting, durable Redis controls, and escape/exhaustion testing."
+
+redis_id="$("${COMPOSE[@]}" ps -q redis)"
+if [[ -z "${redis_id}" ]]; then
+  echo "Redis authentication-state store must be running for private staging." >&2
+  exit 1
+fi
+
+redis_ping="$(docker exec "${redis_id}" redis-cli ping 2>/dev/null || true)"
+if [[ "${redis_ping}" != "PONG" ]]; then
+  echo "Redis authentication-state store did not answer PONG." >&2
+  exit 1
+fi
+
+echo "Redis authentication-state store answered PONG."
+
+compose_network_id() {
+  local logical_network="$1"
+  local network_id
+  while read -r network_id; do
+    [[ -z "${network_id}" ]] && continue
+    if [[ "$(docker network inspect "${network_id}" --format '{{index .Labels "com.docker.compose.network"}}')" == "${logical_network}" ]]; then
+      printf '%s\n' "${network_id}"
+      return 0
+    fi
+  done < <(docker network ls -q)
+  return 1
+}
+
+container_joined_network_id() {
+  local container_id="$1"
+  local network_id="$2"
+  local networks_json
+  networks_json="$(docker inspect "${container_id}" --format '{{json .NetworkSettings.Networks}}')"
+  NETWORKS_JSON="${networks_json}" NETWORK_ID="${network_id}" python3 - <<'PY'
+import json
+import os
+import sys
+
+wanted = os.environ["NETWORK_ID"]
+networks = json.loads(os.environ["NETWORKS_JSON"])
+for network in networks.values():
+    if network.get("NetworkID") == wanted:
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+auth_state_network_id="$(compose_network_id "auth-state" || true)"
+inzozi_network_id="$(compose_network_id "inzozi" || true)"
+
+if [[ -z "${auth_state_network_id}" ]]; then
+  echo "Compose logical network auth-state was not found." >&2
+  exit 1
+fi
+if [[ -z "${inzozi_network_id}" ]]; then
+  echo "Compose logical network inzozi was not found." >&2
+  exit 1
+fi
+
+auth_state_internal="$(docker network inspect "${auth_state_network_id}" --format '{{.Internal}}')"
+if [[ "${auth_state_internal}" != "true" ]]; then
+  echo "Compose logical network auth-state must be internal." >&2
+  exit 1
+fi
+
+if ! container_joined_network_id "${redis_id}" "${auth_state_network_id}"; then
+  echo "Redis must be attached to Compose logical network auth-state." >&2
+  exit 1
+fi
+if container_joined_network_id "${redis_id}" "${inzozi_network_id}"; then
+  echo "Redis must not share Compose logical network inzozi." >&2
+  exit 1
+fi
+
+echo "Redis is isolated on the internal auth-state network."
+
+api_id="$("${COMPOSE[@]}" ps -q api)"
+if [[ -n "${api_id}" ]]; then
+  if ! container_joined_network_id "${api_id}" "${auth_state_network_id}"; then
+    echo "API must join Compose logical network auth-state to reach Redis." >&2
+    exit 1
+  fi
+  if ! container_joined_network_id "${api_id}" "${inzozi_network_id}"; then
+    echo "API must remain on Compose logical network inzozi." >&2
+    exit 1
+  fi
+
+  health_json="$(docker exec "${api_id}" python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=8).read().decode())')"
+  HEALTH_JSON="${health_json}" python3 - <<'PY'
+import json
+import os
+
+payload = json.loads(os.environ["HEALTH_JSON"])
+assert payload.get("status") == "ok"
+assert "auth_state_store" not in payload
+print("API liveness /health is acceptable.")
+PY
+
+  ready_code="$(
+    docker exec "${api_id}" python -c '
+import urllib.error
+import urllib.request
+try:
+    response = urllib.request.urlopen("http://127.0.0.1:8000/ready", timeout=8)
+    print(response.status)
+    print(response.read().decode())
+except urllib.error.HTTPError as exc:
+    print(exc.code)
+    print(exc.read().decode())
+'
+  )"
+  READY_CODE="${ready_code}" python3 - <<'PY'
+import json
+import os
+import sys
+
+lines = os.environ["READY_CODE"].splitlines()
+status = int(lines[0])
+payload = json.loads("\n".join(lines[1:]))
+auth_enabled = payload.get("auth_enabled")
+assert auth_enabled in {True, False}
+if auth_enabled is True:
+    if status != 200 or payload.get("status") != "ready" or payload.get("auth_state_store") != "ready":
+        print(
+            "AUTH_ENABLED=true requires /ready HTTP 200 with status=ready and auth_state_store=ready; "
+            f"got HTTP {status} payload={payload}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+else:
+    assert status == 200
+    assert payload.get("status") == "ready"
+    assert payload.get("auth_state_store") == "disabled"
+print("API readiness /ready is fail-closed for private staging.")
+PY
+fi
+
+echo "Dedicated workspace preflight passed. Public staging remains disabled pending escape/exhaustion testing and HTTPS/secure-cookie hardening. Restricted GitHub helper egress is complete; Redis durable login/session controls are required and checked above."

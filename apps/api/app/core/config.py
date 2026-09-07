@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     app_name: str = "Inzozi Code"
     database_url: str = "postgresql://inzozi_code:change-me@postgres:5432/inzozi_code"
     redis_url: str = "redis://redis:6379/0"
+    redis_socket_connect_timeout_seconds: float = 1.0
+    redis_socket_timeout_seconds: float = 1.0
     aquila_provider: str = "mock"
     aquila_model: str = "mock-v0"
     workspace_service_url: str = "http://workspace:8100"
@@ -25,6 +27,9 @@ class Settings(BaseSettings):
     auth_organization_id: str = "inzozi-digital"
     auth_session_ttl_minutes: int = 480
     auth_cookie_secure: bool = False
+    # Comma-separated proxy hostnames, IPs, or CIDRs allowed to supply X-Real-IP.
+    # Empty means forwarding headers are never trusted (peer IP only).
+    auth_trusted_proxies: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
