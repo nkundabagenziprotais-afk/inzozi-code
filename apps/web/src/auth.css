@@ -1,0 +1,258 @@
+:root {
+  --auth-bg: #0b0f10;
+  --auth-panel: #111718;
+  --auth-border: #263233;
+  --auth-text: #edf4f2;
+  --auth-muted: #8f9d9a;
+  --auth-accent: #7fd9bc;
+  --auth-accent-strong: #a3efd5;
+  --auth-danger: #f0a5a5;
+}
+
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
+  background: var(--auth-bg);
+  color: var(--auth-text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.auth-card {
+  width: min(100%, 560px);
+  border: 1px solid var(--auth-border);
+  background: var(--auth-panel);
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: 0 18px 60px rgb(0 0 0 / 28%);
+}
+
+.auth-brand,
+.auth-brand > div:last-child,
+.auth-trust span,
+.auth-session-chip span {
+  display: flex;
+}
+
+.auth-brand {
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--auth-border);
+}
+
+.auth-brand > div:last-child,
+.auth-trust span,
+.auth-session-chip span {
+  flex-direction: column;
+}
+
+.auth-brand strong {
+  font-size: 15px;
+}
+
+.auth-brand span,
+.auth-trust small,
+.auth-session-chip small {
+  color: var(--auth-muted);
+  font-size: 11px;
+}
+
+.auth-mark {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #31574d;
+  border-radius: 10px;
+  color: var(--auth-accent-strong);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+
+.auth-copy {
+  padding: 28px 0 20px;
+}
+
+.auth-eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--auth-accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.auth-copy h1 {
+  margin: 0;
+  font-size: clamp(24px, 4vw, 34px);
+  line-height: 1.1;
+  letter-spacing: -.025em;
+}
+
+.auth-copy p {
+  max-width: 48ch;
+  margin: 12px 0 0;
+  color: var(--auth-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.auth-form {
+  display: grid;
+  gap: 14px;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 7px;
+  color: #cdd7d5;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.auth-form input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #334142;
+  border-radius: 8px;
+  background: #0c1112;
+  color: var(--auth-text);
+  padding: 12px 13px;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.auth-form input:focus {
+  border-color: var(--auth-accent);
+  box-shadow: 0 0 0 3px rgb(127 217 188 / 12%);
+}
+
+.auth-form button,
+.auth-session-chip button {
+  border: 1px solid #3d6f61;
+  border-radius: 8px;
+  background: #19352d;
+  color: #e9fff7;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.auth-form button {
+  min-height: 44px;
+  margin-top: 2px;
+}
+
+.auth-form button:hover:not(:disabled),
+.auth-session-chip button:hover:not(:disabled) {
+  border-color: var(--auth-accent);
+  background: #20483b;
+}
+
+.auth-form button:disabled,
+.auth-session-chip button:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+.auth-message {
+  border: 1px solid #704747;
+  border-radius: 8px;
+  background: #241718;
+  color: var(--auth-danger);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.auth-trust {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--auth-border);
+}
+
+.auth-trust span {
+  gap: 3px;
+}
+
+.auth-trust strong {
+  font-size: 11px;
+}
+
+.auth-trust small {
+  line-height: 1.4;
+}
+
+.auth-loading {
+  gap: 10px;
+  align-content: center;
+  color: var(--auth-muted);
+}
+
+.auth-loading strong {
+  color: var(--auth-text);
+}
+
+.auth-session-chip {
+  position: fixed;
+  right: 14px;
+  bottom: 34px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(420px, calc(100vw - 28px));
+  padding: 7px 8px 7px 11px;
+  border: 1px solid #2a3c38;
+  border-radius: 10px;
+  background: rgb(12 18 18 / 96%);
+  color: var(--auth-text);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 30%);
+}
+
+.auth-session-chip span {
+  min-width: 0;
+  gap: 1px;
+}
+
+.auth-session-chip strong {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.auth-session-chip button {
+  padding: 6px 8px;
+  font-size: 10px;
+}
+
+@media (max-width: 600px) {
+  .auth-shell {
+    padding: 18px 14px;
+  }
+
+  .auth-card {
+    padding: 21px 18px;
+    border-radius: 12px;
+  }
+
+  .auth-trust {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-session-chip {
+    left: 10px;
+    right: 10px;
+    bottom: 30px;
+    justify-content: space-between;
+  }
+}
