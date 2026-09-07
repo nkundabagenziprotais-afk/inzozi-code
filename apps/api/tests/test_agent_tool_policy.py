@@ -6,7 +6,7 @@ def tool_names(mode: str) -> set[str]:
 
 
 def test_read_only_modes_do_not_receive_write_or_command_tools() -> None:
-    for mode in ("ask", "plan", "review", "deploy"):
+    for mode in ("ask", "plan", "design", "review", "deploy"):
         names = tool_names(mode)
         assert names == {
             "search_repository",

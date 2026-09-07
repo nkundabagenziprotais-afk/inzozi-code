@@ -33,6 +33,11 @@ def _mode_instruction(mode: str) -> str:
         return "Answer questions using repository evidence. Do not edit files or run mutating actions."
     if mode == "plan":
         return "Produce an implementation plan grounded in repository evidence. Do not edit files."
+    if mode == "design":
+        return (
+            "Develop a practical, humanized UI/UX direction grounded in the project and repository evidence. "
+            "Consider responsiveness at 360, 430, 768, 1280, 1440, and 1920 px. Do not edit files in Design mode."
+        )
     if mode == "review":
         return "Review architecture and code critically. Do not edit files."
     if mode == "build":
