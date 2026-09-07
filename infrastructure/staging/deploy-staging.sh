@@ -50,6 +50,13 @@ echo "Commit: ${COMMIT_SHA}"
 "${COMPOSE[@]}" --profile workspace-runtime-image build --pull
 "${COMPOSE[@]}" up -d --remove-orphans
 
+# Compose may recreate api/web while leaving an unchanged nginx container
+# running. Nginx resolves static proxy_pass service names when its
+# configuration is loaded, so an old container can retain stale Docker
+# service IPs. Recreate only nginx after service reconciliation so it loads
+# the current configuration and resolves the current api/web addresses.
+"${COMPOSE[@]}" up -d --no-deps --force-recreate nginx
+
 healthy=0
 for _ in $(seq 1 40); do
   if curl --fail --silent --show-error "${HEALTH_URL}" >/dev/null; then

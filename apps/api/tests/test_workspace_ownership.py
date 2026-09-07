@@ -4,10 +4,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
-from app.routes.auth import _FAILED_LOGINS, router as auth_router
+from app.routes.auth import router as auth_router
 from app.security.auth import AuthMiddleware, hash_password
+from app.security.redis_controls import configure_auth_state_client
 from app.security.workspace_ownership import WorkspaceOwnership, principal_can_access, workspace_namespace
 from app.security.workspace_scope import WorkspaceOwnershipMiddleware
+from tests.fake_redis import FakeAsyncRedis
 
 WORKSPACE_ID = "a" * 32
 
@@ -23,7 +25,7 @@ def _configure(monkeypatch, *, role: str = "developer") -> None:
     monkeypatch.setenv("AUTH_COOKIE_SECURE", "false")
     monkeypatch.setenv("WORKSPACE_OWNERSHIP_ENFORCED", "true")
     get_settings.cache_clear()
-    _FAILED_LOGINS.clear()
+    configure_auth_state_client(FakeAsyncRedis())
 
 
 def _ownership(owner_email: str = "developer@inzozidigital.com", organization_id: str = "inzozi-digital") -> WorkspaceOwnership:

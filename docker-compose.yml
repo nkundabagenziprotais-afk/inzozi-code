@@ -36,17 +36,19 @@ services:
       AUTH_ORGANIZATION_ID: ${AUTH_ORGANIZATION_ID:-inzozi-digital}
       AUTH_SESSION_TTL_MINUTES: ${AUTH_SESSION_TTL_MINUTES:-480}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      AUTH_TRUSTED_PROXIES: ${AUTH_TRUSTED_PROXIES:-nginx}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       workspace-manager:
         condition: service_healthy
     networks:
       - inzozi
+      - auth-state
 
   workspace-manager:
     build:
@@ -197,8 +199,13 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     networks:
-      - inzozi
+      - auth-state
 
   nginx:
     image: nginx:1.27-alpine
@@ -220,6 +227,9 @@ volumes:
 networks:
   inzozi:
     driver: bridge
+  auth-state:
+    driver: bridge
+    internal: true
   workspace-control:
     driver: bridge
     internal: true

@@ -15,6 +15,12 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import get_settings
+from app.security.redis_controls import (
+    AuthStateUnavailableError,
+    SessionInactiveError,
+    session_claims_fingerprint,
+    validate_session,
+)
 
 SESSION_COOKIE: Final[str] = "inzozi_session"
 PASSWORD_SCHEME: Final[str] = "pbkdf2_sha256"
@@ -66,7 +72,7 @@ ROLE_PERMISSIONS: Final[dict[str, frozenset[str]]] = {
     "viewer": frozenset({"agent:use", "workspace:read"}),
 }
 
-PUBLIC_PATHS: Final[frozenset[str]] = frozenset({"/", "/health", "/v1/auth/login"})
+PUBLIC_PATHS: Final[frozenset[str]] = frozenset({"/", "/health", "/ready", "/v1/auth/login"})
 WORKSPACE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^/v1/workspaces/[0-9a-f]{32}(?:/|$)")
 
 
@@ -275,6 +281,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
             response = JSONResponse(status_code=401, content={"detail": "Session expired or invalid"})
             response.delete_cookie(SESSION_COOKIE, path="/")
             return response
+
+        fingerprint = session_claims_fingerprint(
+            email=principal.email,
+            role=principal.role,
+            organization_id=principal.organization_id,
+        )
+        try:
+            await validate_session(jti=principal.session_id, fingerprint=fingerprint)
+        except AuthStateUnavailableError:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Authentication state service unavailable"},
+            )
+        except SessionInactiveError:
+            response = JSONResponse(status_code=401, content={"detail": "Session expired or invalid"})
+            response.delete_cookie(SESSION_COOKIE, path="/")
+            return response
+
         request.state.principal = principal
 
         permission = permission_for_request(request.method, path)
