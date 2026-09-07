@@ -11,14 +11,15 @@ This directory provisions a **disposable** Inzozi Code staging host on Hetzner C
 - lifecycle: ephemeral
 - backups: disabled
 - delete protection: disabled
+- workspace quota pool: 30 GB XFS volume, project quotas enabled during host configuration
 - HTTP/HTTPS: public
 - SSH: **must** be restricted to explicit operator CIDRs
 
-Always check Hetzner's current server and IPv4 pricing before creating the host. Pricing is deliberately not hard-coded into the Terraform configuration.
+Always check Hetzner's current server, IPv4, and volume pricing before creating or expanding the host. Pricing is deliberately not hard-coded into the Terraform configuration.
 
 ## Trust boundaries
 
-Terraform manages only the temporary cloud host, firewall, and staging SSH public-key registration.
+Terraform manages only the temporary cloud host, firewall, staging SSH public-key registration, and the disposable XFS workspace-quota volume.
 
 It does **not** manage:
 
@@ -81,7 +82,7 @@ INZOZI_CONFIRM_CREATE=CREATE_HETZNER_STAGING \
   ./infrastructure/hetzner/up.sh
 ```
 
-The script runs `terraform init`, formatting checks, validation, an execution plan, then applies that exact plan.
+The script runs `terraform init`, formatting checks, validation, an execution plan, then applies that exact plan. The default plan includes the disposable XFS workspace quota volume. `workspace_quota_volume_size_gb` can be changed deliberately before planning; it is not the same as the per-workspace byte limit.
 
 ## Bootstrap and verify
 
@@ -100,18 +101,40 @@ SSH_KEY_PATH=~/.ssh/inzozi_code_staging_ed25519 \
 
 The wrapper waits for cloud-init, copies the provider-neutral `infrastructure/staging/bootstrap-host.sh`, runs it with `sudo`, then verifies Docker, Docker Compose, and Nginx.
 
+## Configure hard workspace quota storage
+
+Before deploying a broker revision that requires hard disk quotas, disconnect all active workspaces and run:
+
+```bash
+export SSH_KEY_PATH="$HOME/.ssh/inzozi_code_staging_ed25519"
+./infrastructure/hetzner/configure-workspace-quota-storage.sh
+```
+
+This script reads the reviewed Terraform outputs, then on the staging host it:
+
+- refuses to proceed if a workspace runtime is active;
+- refuses to format an unexpected device;
+- verifies the Terraform-created volume is already XFS;
+- mounts it at `/srv/inzozi-code/workspace-data` through `/etc/fstab` with `prjquota`;
+- verifies the mounted UUID, filesystem type, and mount options;
+- runs a destructive **probe only inside a temporary quota test directory**: a 2 MiB write must be rejected by a 1 MiB XFS project hard limit;
+- cleans the probe and leaves the quota pool mounted for broker-managed workspace directories.
+
+The script does not read application credentials and does not expose the Hetzner API token.
+
 ## Application deployment
 
-After the host is verified:
+After the host and quota storage are verified:
 
 1. Put the **reviewed** Git checkout at `/srv/inzozi-code/application`.
 2. Create `/srv/inzozi-code/.env.staging` on the server with mode `600`.
 3. Mount the GitHub App PEM into the API container through the staging Compose override; never commit it.
 4. Configure host Nginx from `infrastructure/staging/host-nginx.conf.template`.
-5. Point `code-staging.inzozidigital.com` to the temporary IPv4 only when you are ready for browser testing.
+5. Keep public DNS disabled until every public-staging security blocker is accepted.
 6. Request TLS only after DNS resolves correctly.
 7. Run `infrastructure/staging/deploy-staging.sh` on the server.
-8. Verify `/health`, logs, Git commit SHA, and UI at 360, 430, 768, 1280, 1440, and 1920 px.
+8. Run `infrastructure/staging/dedicated-workspace-preflight.sh`; it must prove the XFS hard quota in addition to the existing broker/runtime boundaries.
+9. Verify `/health`, logs, Git commit SHA, and UI at 360, 430, 768, 1280, 1440, and 1920 px.
 
 ## Destroy when review is complete
 
@@ -122,7 +145,7 @@ INZOZI_CONFIRM_DESTROY=DESTROY_HETZNER_STAGING \
   ./infrastructure/hetzner/down.sh
 ```
 
-The destroy script plans the deletion first and then applies that exact destroy plan. Confirm in the Hetzner console that the server is gone after completion.
+The destroy script plans the deletion first and then applies that exact destroy plan. The Terraform-managed XFS quota volume is part of the disposable stack and is destroyed with the staging infrastructure. Confirm in the Hetzner console that both the server and workspace quota volume are gone after completion.
 
 ## Recreate later
 
@@ -131,8 +154,9 @@ The intended rhythm is:
 ```text
 GitHub + CI
   -> prepare local operator machine
-  -> create temporary Hetzner staging
+  -> create temporary Hetzner staging + XFS quota volume
   -> bootstrap
+  -> configure XFS project quota storage
   -> deploy reviewed commit
   -> browser / Aquila / Git workflow testing
   -> capture findings

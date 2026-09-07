@@ -6,6 +6,7 @@ import './styles.css'
 import './project-policy.css'
 import './git-review.css'
 import './pull-request.css'
+import './repository-history.css'
 import './auth.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

@@ -90,6 +90,8 @@ services:
     restart: unless-stopped
     environment:
       WORKSPACE_RUNTIME_IMAGE: ${WORKSPACE_RUNTIME_IMAGE:-inzozi-code-workspace-runtime:local}
+      WORKSPACE_QUOTA_HELPER_IMAGE: ${WORKSPACE_QUOTA_HELPER_IMAGE:-inzozi-code-workspace-quota-helper:local}
+      WORKSPACE_QUOTA_STORAGE_ROOT: ${WORKSPACE_QUOTA_STORAGE_ROOT:-/srv/inzozi-code/workspace-data}
       WORKSPACE_MANAGER_SERVICE_HOST: workspace-manager
       WORKSPACE_BROKER_TOKEN: ${WORKSPACE_BROKER_TOKEN:-development-only-broker-token-change-me}
       WORKSPACE_EGRESS_NETWORK: ${WORKSPACE_EGRESS_NETWORK:-inzozi-workspace-egress}
@@ -131,6 +133,13 @@ services:
     image: ${WORKSPACE_RUNTIME_IMAGE:-inzozi-code-workspace-runtime:local}
     build:
       context: ./services/workspace/runtime
+    profiles:
+      - workspace-runtime-image
+
+  workspace-quota-helper-image:
+    image: ${WORKSPACE_QUOTA_HELPER_IMAGE:-inzozi-code-workspace-quota-helper:local}
+    build:
+      context: ./services/workspace/quota-helper
     profiles:
       - workspace-runtime-image
 
