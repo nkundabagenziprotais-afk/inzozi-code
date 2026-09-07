@@ -556,7 +556,9 @@ def test_ready_endpoint_reports_auth_store_outage(monkeypatch):
     configure_auth_state_client(None)
 
 
-def test_login_runs_password_verification_in_threadpool(monkeypatch):
+def test_login_runs_blocking_work_in_threadpool(monkeypatch):
+    from app.security.redis_controls import resolve_login_client_host
+
     _configure_auth(monkeypatch)
     seen: list[object] = []
 
@@ -578,8 +580,9 @@ def test_login_runs_password_verification_in_threadpool(monkeypatch):
         )
         assert ok.status_code == 200
 
-    assert seen
-    assert all(fn is verify_password for fn in seen)
+    assert resolve_login_client_host in seen
+    assert verify_password in seen
+    assert set(seen) == {resolve_login_client_host, verify_password}
     get_settings.cache_clear()
     configure_auth_state_client(None)
 

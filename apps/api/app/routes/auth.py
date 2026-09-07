@@ -35,12 +35,16 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=1024)
 
 
-def _login_digest(request: Request, email: str) -> str:
+async def _login_digest(request: Request, email: str) -> str:
     peer = request.client.host if request.client else "unknown"
-    client_host = resolve_login_client_host(
+    # Extract header strings on the event loop; resolve (may DNS) off-loop.
+    x_real_ip = request.headers.get("x-real-ip")
+    x_forwarded_for = request.headers.get("x-forwarded-for")
+    client_host = await run_in_threadpool(
+        resolve_login_client_host,
         peer_host=peer,
-        x_real_ip=request.headers.get("x-real-ip"),
-        x_forwarded_for=request.headers.get("x-forwarded-for"),
+        x_real_ip=x_real_ip,
+        x_forwarded_for=x_forwarded_for,
     )
     return login_identifier_digest(client_host=client_host, email=email)
 
@@ -55,7 +59,7 @@ async def login(payload: LoginRequest, request: Request, response: Response) -> 
         raise HTTPException(status_code=503, detail="Staging authentication is not fully configured")
 
     email = payload.email.casefold().strip()
-    digest = _login_digest(request, email)
+    digest = await _login_digest(request, email)
 
     try:
         if await get_login_failure_count(digest) >= MAX_FAILED_LOGINS:

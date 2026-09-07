@@ -314,16 +314,45 @@ fi
 
 echo "Redis authentication-state store answered PONG."
 
+api_id="$("${COMPOSE[@]}" ps -q api)"
+if [[ -z "${api_id}" ]]; then
+  echo "API must be running for private staging preflight." >&2
+  exit 1
+fi
+
+redis_full_id="$(docker inspect "${redis_id}" --format '{{.Id}}')"
+api_full_id="$(docker inspect "${api_id}" --format '{{.Id}}')"
+redis_project="$(docker inspect "${redis_id}" --format '{{index .Config.Labels "com.docker.compose.project"}}')"
+api_project="$(docker inspect "${api_id}" --format '{{index .Config.Labels "com.docker.compose.project"}}')"
+
+if [[ -z "${redis_project}" ]]; then
+  echo "Redis is missing com.docker.compose.project label." >&2
+  exit 1
+fi
+if [[ -z "${api_project}" ]]; then
+  echo "API is missing com.docker.compose.project label." >&2
+  exit 1
+fi
+if [[ "${redis_project}" != "${api_project}" ]]; then
+  echo "Redis and API must share the same Compose project label (got redis=${redis_project} api=${api_project})." >&2
+  exit 1
+fi
+
+compose_project="${redis_project}"
+
 compose_network_id() {
   local logical_network="$1"
-  local network_id
+  local project="$2"
+  local network_id network_project network_logical
   while read -r network_id; do
     [[ -z "${network_id}" ]] && continue
-    if [[ "$(docker network inspect "${network_id}" --format '{{index .Labels "com.docker.compose.network"}}')" == "${logical_network}" ]]; then
+    network_project="$(docker network inspect "${network_id}" --format '{{index .Labels "com.docker.compose.project"}}')"
+    network_logical="$(docker network inspect "${network_id}" --format '{{index .Labels "com.docker.compose.network"}}')"
+    if [[ "${network_project}" == "${project}" && "${network_logical}" == "${logical_network}" ]]; then
       printf '%s\n' "${network_id}"
       return 0
     fi
-  done < <(docker network ls -q)
+  done < <(docker network ls --no-trunc -q)
   return 1
 }
 
@@ -346,15 +375,15 @@ raise SystemExit(1)
 PY
 }
 
-auth_state_network_id="$(compose_network_id "auth-state" || true)"
-inzozi_network_id="$(compose_network_id "inzozi" || true)"
+auth_state_network_id="$(compose_network_id "auth-state" "${compose_project}" || true)"
+inzozi_network_id="$(compose_network_id "inzozi" "${compose_project}" || true)"
 
 if [[ -z "${auth_state_network_id}" ]]; then
-  echo "Compose logical network auth-state was not found." >&2
+  echo "Compose logical network auth-state was not found for project ${compose_project}." >&2
   exit 1
 fi
 if [[ -z "${inzozi_network_id}" ]]; then
-  echo "Compose logical network inzozi was not found." >&2
+  echo "Compose logical network inzozi was not found for project ${compose_project}." >&2
   exit 1
 fi
 
@@ -364,30 +393,49 @@ if [[ "${auth_state_internal}" != "true" ]]; then
   exit 1
 fi
 
-if ! container_joined_network_id "${redis_id}" "${auth_state_network_id}"; then
+if ! container_joined_network_id "${redis_full_id}" "${auth_state_network_id}"; then
   echo "Redis must be attached to Compose logical network auth-state." >&2
   exit 1
 fi
-if container_joined_network_id "${redis_id}" "${inzozi_network_id}"; then
+if container_joined_network_id "${redis_full_id}" "${inzozi_network_id}"; then
   echo "Redis must not share Compose logical network inzozi." >&2
   exit 1
 fi
+if ! container_joined_network_id "${api_full_id}" "${auth_state_network_id}"; then
+  echo "API must join Compose logical network auth-state to reach Redis." >&2
+  exit 1
+fi
+if ! container_joined_network_id "${api_full_id}" "${inzozi_network_id}"; then
+  echo "API must remain on Compose logical network inzozi." >&2
+  exit 1
+fi
 
-echo "Redis is isolated on the internal auth-state network."
+auth_state_containers_json="$(docker network inspect "${auth_state_network_id}" --format '{{json .Containers}}')"
+AUTH_STATE_CONTAINERS_JSON="${auth_state_containers_json}" \
+REDIS_FULL_ID="${redis_full_id}" \
+API_FULL_ID="${api_full_id}" \
+python3 - <<'PY'
+import json
+import os
+import sys
 
-api_id="$("${COMPOSE[@]}" ps -q api)"
-if [[ -n "${api_id}" ]]; then
-  if ! container_joined_network_id "${api_id}" "${auth_state_network_id}"; then
-    echo "API must join Compose logical network auth-state to reach Redis." >&2
-    exit 1
-  fi
-  if ! container_joined_network_id "${api_id}" "${inzozi_network_id}"; then
-    echo "API must remain on Compose logical network inzozi." >&2
-    exit 1
-  fi
+containers = json.loads(os.environ["AUTH_STATE_CONTAINERS_JSON"] or "{}")
+attached = set(containers.keys())
+expected = {os.environ["REDIS_FULL_ID"], os.environ["API_FULL_ID"]}
+if attached != expected:
+    print(
+        "auth-state must attach exactly API and Redis; "
+        f"expected={sorted(expected)} attached={sorted(attached)}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+print("auth-state network attaches exactly API and Redis.")
+PY
 
-  health_json="$(docker exec "${api_id}" python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=8).read().decode())')"
-  HEALTH_JSON="${health_json}" python3 - <<'PY'
+echo "Redis is isolated on the internal auth-state network with API-only membership."
+
+health_json="$(docker exec "${api_id}" python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=8).read().decode())')"
+HEALTH_JSON="${health_json}" python3 - <<'PY'
 import json
 import os
 
@@ -397,8 +445,8 @@ assert "auth_state_store" not in payload
 print("API liveness /health is acceptable.")
 PY
 
-  ready_code="$(
-    docker exec "${api_id}" python -c '
+ready_code="$(
+  docker exec "${api_id}" python -c '
 import urllib.error
 import urllib.request
 try:
@@ -409,8 +457,8 @@ except urllib.error.HTTPError as exc:
     print(exc.code)
     print(exc.read().decode())
 '
-  )"
-  READY_CODE="${ready_code}" python3 - <<'PY'
+)"
+READY_CODE="${ready_code}" python3 - <<'PY'
 import json
 import os
 import sys
@@ -434,6 +482,5 @@ else:
     assert payload.get("auth_state_store") == "disabled"
 print("API readiness /ready is fail-closed for private staging.")
 PY
-fi
 
 echo "Dedicated workspace preflight passed. Public staging remains disabled pending escape/exhaustion testing and HTTPS/secure-cookie hardening. Restricted GitHub helper egress is complete; Redis durable login/session controls are required and checked above."
