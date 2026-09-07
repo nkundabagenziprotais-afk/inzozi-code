@@ -11,6 +11,7 @@ import jwt
 from app.core.config import get_settings
 
 GITHUB_API = "https://api.github.com"
+GITHUB_API_VERSION = "2026-03-10"
 
 
 class GitHubAppError(RuntimeError):
@@ -42,7 +43,10 @@ def _private_key() -> str:
         path = Path(settings.github_app_private_key_path)
         if not path.is_file():
             raise GitHubAppError("Configured GitHub App private key file was not found")
-        return path.read_text(encoding="utf-8")
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise GitHubAppError("Configured GitHub App private key file is not readable") from exc
     raise GitHubAppError("GitHub App private key is not configured")
 
 
@@ -85,6 +89,69 @@ def create_app_jwt() -> str:
     return jwt.encode(payload, _private_key(), algorithm="RS256")
 
 
+def _app_api_headers(jwt_token: str) -> dict[str, str]:
+    return {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {jwt_token}",
+        "X-GitHub-Api-Version": GITHUB_API_VERSION,
+        "User-Agent": "Inzozi-Code",
+    }
+
+
+def _repo_api_headers(token: str) -> dict[str, str]:
+    return {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": GITHUB_API_VERSION,
+        "User-Agent": "Inzozi-Code",
+    }
+
+
+def permission_readiness(permissions: dict[str, object] | None) -> dict[str, bool]:
+    permissions = permissions if isinstance(permissions, dict) else {}
+    contents = permissions.get("contents")
+    pull_requests = permissions.get("pull_requests")
+    contents_read = contents in {"read", "write"}
+    return {
+        "private_clone": contents_read,
+        "remote_push": contents == "write",
+        "draft_pull_request": contents_read and pull_requests == "write",
+    }
+
+
+async def get_installation_summary(installation_id: int) -> dict:
+    """Read safe installation metadata using an App JWT. No installation token is returned."""
+    if not isinstance(installation_id, int) or installation_id <= 0:
+        raise GitHubAppError("GitHub App installation ID is invalid")
+    app_jwt = create_app_jwt()
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(
+            f"{GITHUB_API}/app/installations/{installation_id}",
+            headers=_app_api_headers(app_jwt),
+        )
+    if response.status_code == 404:
+        raise GitHubAppError("Configured GitHub App installation was not found")
+    if response.is_error:
+        raise GitHubAppError(f"Unable to inspect the GitHub App installation ({response.status_code})")
+    payload = response.json()
+    account = payload.get("account") if isinstance(payload, dict) else None
+    account_login = account.get("login") if isinstance(account, dict) else None
+    permissions = payload.get("permissions") if isinstance(payload, dict) else None
+    if not isinstance(permissions, dict):
+        permissions = {}
+    return {
+        "installation_id": installation_id,
+        "account": account_login if isinstance(account_login, str) else "",
+        "repository_selection": payload.get("repository_selection", "unknown") if isinstance(payload, dict) else "unknown",
+        "permissions": {
+            "contents": permissions.get("contents", "none"),
+            "pull_requests": permissions.get("pull_requests", "none"),
+        },
+        "suspended": bool(payload.get("suspended_at")) if isinstance(payload, dict) else False,
+        "readiness": permission_readiness(permissions),
+    }
+
+
 async def create_installation_token(
     installation_id: int,
     repository_url: str,
@@ -95,12 +162,6 @@ async def create_installation_token(
     """Mint a short-lived repository-scoped token with only the requested repository permissions."""
     repository_name = repository_name_from_url(repository_url)
     app_jwt = create_app_jwt()
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {app_jwt}",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "Inzozi-Code",
-    }
     permissions: dict[str, str] = {"contents": contents_permission}
     if pull_requests_permission is not None:
         permissions["pull_requests"] = pull_requests_permission
@@ -111,7 +172,7 @@ async def create_installation_token(
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
             f"{GITHUB_API}/app/installations/{installation_id}/access_tokens",
-            headers=headers,
+            headers=_app_api_headers(app_jwt),
             json=payload,
         )
     if response.is_error:
@@ -122,12 +183,31 @@ async def create_installation_token(
     return token
 
 
-def _repo_api_headers(token: str) -> dict[str, str]:
+async def verify_repository_access(repository_url: str, installation_id: int) -> dict:
+    """Verify read access with a repository-scoped token and return only non-secret repository metadata."""
+    owner, repository = repository_coordinates_from_url(repository_url)
+    token = await create_installation_token(
+        installation_id,
+        repository_url,
+        contents_permission="read",
+    )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(
+            f"{GITHUB_API}/repos/{owner}/{repository}",
+            headers=_repo_api_headers(token),
+        )
+    if response.status_code == 404:
+        raise GitHubAppError("GitHub App installation cannot access this repository")
+    if response.is_error:
+        raise GitHubAppError(f"Unable to verify repository access ({response.status_code})")
+    payload = response.json()
+    full_name = payload.get("full_name") if isinstance(payload, dict) else None
+    default_branch = payload.get("default_branch") if isinstance(payload, dict) else None
     return {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "Inzozi-Code",
+        "full_name": full_name if isinstance(full_name, str) else f"{owner}/{repository}",
+        "private": bool(payload.get("private")) if isinstance(payload, dict) else False,
+        "default_branch": default_branch if isinstance(default_branch, str) else "",
+        "read_access_verified": True,
     }
 
 
