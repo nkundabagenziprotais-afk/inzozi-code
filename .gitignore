@@ -14,3 +14,13 @@ coverage/
 .DS_Store
 workspaces/
 logs/
+secrets/
+*.pem
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log

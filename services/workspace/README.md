@@ -1,27 +1,30 @@
-# Workspace Manager (V0.2 implementation target)
+# Workspace Manager
 
-The workspace manager is the security boundary between Aquila and executable project code.
+The workspace runtime is the first executable-code security boundary between Aquila and a project repository.
 
-## Rules
+## V0.1.1 implemented contract
 
-- One project/session runs in an isolated, non-root container.
-- The agent never receives access to the Docker host socket.
-- CPU, memory, process count, disk and execution time are limited.
-- Production credentials are not mounted into development workspaces.
-- Network egress is restricted by policy.
-- Destructive commands are denied or require explicit approval depending on environment.
-- Every tool call is written to the audit log.
+- `POST /v1/workspaces` — clone a GitHub HTTPS repository into a generated workspace.
+- `GET /v1/workspaces/{id}/tree` — browse files without exposing `.git`.
+- `GET /v1/workspaces/{id}/files/{path}` — read UTF-8 files with size limits.
+- `PUT /v1/workspaces/{id}/files/{path}` — guarded writes with optional SHA-256 optimistic locking.
+- `POST /v1/workspaces/{id}/actions` — execute predefined safe recipes only.
+- `GET /v1/workspaces/{id}/git/status` — real Git status.
+- `GET /v1/workspaces/{id}/git/diff` — real Git diff.
+- `DELETE /v1/workspaces/{id}` — remove the workspace.
 
-## Planned tool contract
+## Safety boundaries
 
-- `workspace.create`
-- `workspace.clone_repository`
-- `workspace.read_file`
-- `workspace.search`
-- `workspace.apply_patch`
-- `workspace.run_command`
-- `workspace.run_tests`
-- `workspace.start_preview`
-- `workspace.git_diff`
-- `workspace.checkpoint`
-- `workspace.destroy`
+- No `/bin/sh -c` or arbitrary shell command API.
+- No Docker host socket mounted into the workspace service.
+- Workspace paths are resolved and rejected if they escape `/workspaces/<id>/repo`.
+- `.git` metadata cannot be edited through the file API.
+- File reads/writes and command output have size limits.
+- Commands are recipe-based and time-limited.
+- Clone prompts are disabled (`GIT_TERMINAL_PROMPT=0`) so credentials are never requested interactively.
+- Every mutation and command execution writes an audit event.
+- Production credentials are not mounted into this service.
+
+## Current limitation
+
+V0.1.1 uses one dedicated workspace-runtime container with per-workspace directories. The production design remains **one isolated container/VM per active project/session**. Container-per-workspace scheduling, private-repository GitHub App tokens, CPU/memory quotas, network egress policy and checkpoints are the next hardening steps.
