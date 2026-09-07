@@ -1,0 +1,12 @@
+[project]
+name = "inzozi-code-workspace-quota-helper"
+version = "0.1.0"
+description = "Fixed-purpose XFS project quota helper for Inzozi Code"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.4,<9"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
