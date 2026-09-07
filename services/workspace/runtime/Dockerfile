@@ -20,4 +20,5 @@ RUN useradd --create-home --uid 10002 workspace \
 USER workspace
 
 EXPOSE 8100
+ENTRYPOINT ["python", "-m", "app.entrypoint"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100"]

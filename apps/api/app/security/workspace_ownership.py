@@ -137,6 +137,48 @@ def principal_can_access(principal, ownership: WorkspaceOwnership) -> bool:
     return principal.email.casefold() == ownership.owner_email.casefold()
 
 
+def list_accessible_active_workspaces(principal, limit: int = 20) -> list[WorkspaceOwnership]:
+    """Return durable active workspaces the principal may recover, newest first.
+
+    Discovery is ownership-registry only. Results stay organization-scoped and
+    follow the same privilege rules as principal_can_access().
+    """
+    bounded_limit = max(1, min(int(limit), 20))
+    organization_id = principal.organization_id
+    select_columns = (
+        "workspace_id, organization_id, owner_email, owner_role, repository_url, "
+        "namespace, created_at, deleted_at"
+    )
+    with _connect() as connection, connection.cursor() as cursor:
+        if principal.role in PRIVILEGED_ROLES:
+            cursor.execute(
+                f"""
+                SELECT {select_columns}
+                FROM workspace_ownership
+                WHERE deleted_at IS NULL
+                  AND organization_id = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (organization_id, bounded_limit),
+            )
+        else:
+            cursor.execute(
+                f"""
+                SELECT {select_columns}
+                FROM workspace_ownership
+                WHERE deleted_at IS NULL
+                  AND organization_id = %s
+                  AND owner_email = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (organization_id, principal.email.casefold(), bounded_limit),
+            )
+        rows = cursor.fetchall()
+    return [WorkspaceOwnership(**row) for row in rows]
+
+
 def mark_workspace_deleted(workspace_id: str) -> None:
     with _connect() as connection, connection.cursor() as cursor:
         cursor.execute(

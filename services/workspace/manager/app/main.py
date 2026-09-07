@@ -143,7 +143,7 @@ async def _proxy_to_runtime(workspace_id: str, subpath: str, request: Request) -
 
 app = FastAPI(
     title="Inzozi Code Workspace Manager",
-    version="0.2.0",
+    version="0.3.0",
     description="Unprivileged manager for brokered, dedicated Inzozi Code workspaces",
 )
 
@@ -159,12 +159,17 @@ async def health() -> dict:
         raise HTTPException(status_code=503, detail="Workspace broker is unavailable") from exc
     if response.status_code != 200:
         raise HTTPException(status_code=503, detail="Workspace broker is not ready")
+    try:
+        broker_health = response.json()
+    except ValueError:
+        broker_health = {}
     return {
         "status": "ok",
         "service": "workspace-manager",
         "mode": "brokered-dedicated-workspaces",
         "runtime_egress": "denied",
         "docker_socket": "absent",
+        "disk_quota": broker_health.get("disk_quota", "unknown"),
     }
 
 
@@ -193,7 +198,7 @@ async def create_workspace(payload: CreateWorkspaceRequest, request: Request) ->
         "git_token": payload.git_token.get_secret_value() if payload.git_token else None,
         "expires_at": expires_at,
     }
-    await _broker_request("POST", "/v1/workspaces", json=broker_payload)
+    broker_result = await _broker_request("POST", "/v1/workspaces", json=broker_payload) or {}
     await _wait_for_runtime(workspace_id)
     return {
         "workspace_id": workspace_id,
@@ -203,6 +208,8 @@ async def create_workspace(payload: CreateWorkspaceRequest, request: Request) ->
         "execution_isolation": "dedicated-container",
         "control_plane": "narrow-docker-broker",
         "runtime_egress": "denied",
+        "disk_quota": broker_result.get("disk_quota", "unknown"),
+        "disk_limit_bytes": broker_result.get("disk_limit_bytes"),
         "expires_at": datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat(),
     }
 
