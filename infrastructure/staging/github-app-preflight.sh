@@ -3,7 +3,6 @@ set -euo pipefail
 
 APP_ROOT="${APP_ROOT:-/srv/inzozi-code/application}"
 ENV_FILE="${ENV_FILE:-/srv/inzozi-code/.env.staging}"
-API_URL="${API_URL:-http://127.0.0.1:8000}"
 REPOSITORY_URL="${REPOSITORY_URL:-}"
 STAGING_COMPOSE="${APP_ROOT}/infrastructure/staging/docker-compose.staging.yml"
 
@@ -64,62 +63,80 @@ cd "${APP_ROOT}"
 COMPOSE=(docker compose --env-file "${ENV_FILE}" -f docker-compose.yml -f "${STAGING_COMPOSE}")
 "${COMPOSE[@]}" config --quiet
 
-"${COMPOSE[@]}" exec -T api python - <<'PY'
+"${COMPOSE[@]}" exec -T -e REPOSITORY_URL="${REPOSITORY_URL}" api python - <<'PY'
+import asyncio
+import json
+import os
 from pathlib import Path
+
 from app.core.config import get_settings
+from app.integrations.github_app import (
+    default_installation_for,
+    get_installation_summary,
+    github_app_configured,
+    verify_repository_access,
+)
 
-settings = get_settings()
-path = Path(settings.github_app_private_key_path)
-if not path.is_file():
-    raise SystemExit("GitHub App key is not mounted inside the API container")
-text = path.read_text(encoding="utf-8")
-if "PRIVATE KEY" not in text:
-    raise SystemExit("Mounted GitHub App key does not look like a PEM private key")
-print("API container can read the mounted GitHub App key.")
+
+async def main() -> None:
+    settings = get_settings()
+    path = Path(settings.github_app_private_key_path)
+    if not path.is_file():
+        raise SystemExit("GitHub App key is not mounted inside the API container")
+    text = path.read_text(encoding="utf-8")
+    if "PRIVATE KEY" not in text:
+        raise SystemExit("Mounted GitHub App key does not look like a PEM private key")
+    print("API container can read the mounted GitHub App key.")
+
+    if not github_app_configured():
+        raise SystemExit("GitHub App staging credentials are not fully configured")
+    installation_id = int(settings.github_app_default_installation_id)
+    summary = await get_installation_summary(installation_id)
+    owner_matches = bool(summary["account"]) and summary["account"].casefold() == settings.github_app_owner.casefold()
+    readiness = summary["readiness"]
+    gates = {
+        "private_clone": owner_matches and not summary["suspended"] and readiness["private_clone"],
+        "remote_push": owner_matches and not summary["suspended"] and readiness["remote_push"],
+        "draft_pull_request": owner_matches and not summary["suspended"] and readiness["draft_pull_request"],
+    }
+    safe_status = {
+        "configured": True,
+        "owner": settings.github_app_owner,
+        "owner_matches_installation": owner_matches,
+        "key_loaded": True,
+        "installation": {
+            "account": summary["account"],
+            "repository_selection": summary["repository_selection"],
+            "permissions": summary["permissions"],
+            "suspended": summary["suspended"],
+        },
+        "gates": gates,
+    }
+    print(json.dumps(safe_status, separators=(",", ":")))
+    missing = [name for name, ready in gates.items() if not ready]
+    if missing:
+        raise SystemExit("GitHub App permissions are incomplete for: " + ", ".join(missing))
+    print("GitHub App installation permissions are ready for clone, push, and draft PR gates.")
+
+    repository_url = os.environ.get("REPOSITORY_URL", "").strip()
+    if not repository_url:
+        print("Set REPOSITORY_URL to verify one selected private repository as an additional preflight.")
+        return
+    repository_installation = default_installation_for(repository_url)
+    if repository_installation is None:
+        raise SystemExit("Repository owner does not match the configured GitHub App installation owner")
+    repository = await verify_repository_access(repository_url, repository_installation)
+    safe_repository = {
+        "verified": True,
+        "repository": repository,
+        "token_returned": False,
+        "permission_used": "contents:read",
+    }
+    print(json.dumps(safe_repository, separators=(",", ":")))
+    if not repository.get("read_access_verified"):
+        raise SystemExit("Repository-scoped read access was not verified")
+    print("Repository-scoped private clone preflight passed for " + repository.get("full_name", "repository"))
+
+
+asyncio.run(main())
 PY
-
-status_json="$(curl --fail --silent --show-error "${API_URL}/v1/github-app/status")"
-printf '%s\n' "${status_json}"
-
-STATUS_JSON="${status_json}" python3 - <<'PY'
-import json
-import os
-
-payload = json.loads(os.environ["STATUS_JSON"])
-if not payload.get("configured"):
-    raise SystemExit("GitHub App status reports configured=false")
-if not payload.get("owner_matches_installation"):
-    raise SystemExit("GitHub App installation owner does not match the configured owner")
-gates = payload.get("gates") or {}
-missing = [name for name in ("private_clone", "remote_push", "draft_pull_request") if not gates.get(name)]
-if missing:
-    raise SystemExit("GitHub App permissions are incomplete for: " + ", ".join(missing))
-print("GitHub App installation permissions are ready for clone, push, and draft PR gates.")
-PY
-
-if [[ -n "${REPOSITORY_URL}" ]]; then
-  verify_payload="$(REPOSITORY_URL="${REPOSITORY_URL}" python3 - <<'PY'
-import json
-import os
-print(json.dumps({"repository_url": os.environ["REPOSITORY_URL"]}))
-PY
-)"
-  verify_json="$(curl --fail --silent --show-error \
-    -H 'Content-Type: application/json' \
-    -d "${verify_payload}" \
-    "${API_URL}/v1/github-app/verify-repository")"
-  printf '%s\n' "${verify_json}"
-  VERIFY_JSON="${verify_json}" python3 - <<'PY'
-import json
-import os
-payload = json.loads(os.environ["VERIFY_JSON"])
-if not payload.get("verified") or payload.get("token_returned") is not False:
-    raise SystemExit("Repository verification did not meet the expected secret boundary")
-repository = payload.get("repository") or {}
-if not repository.get("read_access_verified"):
-    raise SystemExit("Repository-scoped read access was not verified")
-print("Repository-scoped private clone preflight passed for " + repository.get("full_name", "repository"))
-PY
-else
-  echo "Set REPOSITORY_URL to verify one selected private repository as an additional preflight."
-fi
