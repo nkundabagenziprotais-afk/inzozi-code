@@ -5,7 +5,11 @@ APP_ROOT="${APP_ROOT:-/srv/inzozi-code/application}"
 ENV_FILE="${ENV_FILE:-/srv/inzozi-code/.env.staging}"
 STAGING_COMPOSE="${APP_ROOT}/infrastructure/staging/docker-compose.staging.yml"
 RUNTIME_IMAGE="${WORKSPACE_RUNTIME_IMAGE:-inzozi-code-workspace-runtime:local}"
-HELPER_NETWORK="${WORKSPACE_EGRESS_NETWORK:-inzozi-workspace-egress}"
+HELPER_NETWORK="inzozi-workspace-helper-restricted"
+UPLINK_NETWORK="inzozi-workspace-egress-uplink"
+PROXY_SERVICE="workspace-egress-proxy"
+PROXY_URL="http://workspace-egress-proxy:3128"
+LEGACY_HELPER_NETWORK="inzozi-workspace-egress"
 
 cd "${APP_ROOT}"
 COMPOSE=(docker compose --env-file "${ENV_FILE}" -f docker-compose.yml -f "${STAGING_COMPOSE}")
@@ -67,6 +71,7 @@ assert payload["manager_docker_socket"] is False
 assert payload["manager_privilege"] == "unprivileged"
 assert payload["control_plane"] == "narrow-docker-broker"
 assert payload["runtime_egress"] == "denied"
+assert payload["git_helper_egress"] == "github-only-connect-proxy"
 assert int(payload["disk_quota_bytes"]) > 0
 assert payload["disk_quota_mode"] == "xfs-project-hard"
 assert payload["quota_filesystem"] == "xfs"
@@ -147,11 +152,73 @@ fi
 
 echo "Runtime egress-deny probe passed: isolated workspace networks cannot reach github.com."
 
-helper_internal="$(docker network inspect "${HELPER_NETWORK}" --format '{{.Internal}}')"
-if [[ "${helper_internal}" != "false" ]]; then
-  echo "Workspace helper egress network must not be internal." >&2
+proxy_id="$("${COMPOSE[@]}" ps -q "${PROXY_SERVICE}")"
+
+if [[ -z "${proxy_id}" ]]; then
+  echo "Workspace GitHub egress proxy must be running." >&2
   exit 1
 fi
+
+proxy_uid="$(docker exec "${proxy_id}" id -u)"
+
+proxy_socket_mounts="$(
+  docker inspect "${proxy_id}" \
+    --format '{{range .Mounts}}{{if eq .Destination "/var/run/docker.sock"}}1{{end}}{{end}}'
+)"
+
+if [[ "${proxy_uid}" == "0" || -n "${proxy_socket_mounts}" ]]; then
+  echo "Workspace GitHub egress proxy must be non-root and socket-free." >&2
+  exit 1
+fi
+
+helper_internal="$(
+  docker network inspect \
+    "${HELPER_NETWORK}" \
+    --format '{{.Internal}}'
+)"
+
+uplink_internal="$(
+  docker network inspect \
+    "${UPLINK_NETWORK}" \
+    --format '{{.Internal}}'
+)"
+
+if [[ "${helper_internal}" != "true" ]]; then
+  echo "Restricted helper network must be internal." >&2
+  exit 1
+fi
+
+if [[ "${uplink_internal}" != "false" ]]; then
+  echo "Proxy uplink network must provide outbound connectivity." >&2
+  exit 1
+fi
+
+echo "Workspace GitHub proxy topology is restricted as expected."
+
+set +e
+
+docker run --rm \
+  --network "${HELPER_NETWORK}" \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=134217728 \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --memory 128m \
+  --pids-limit 32 \
+  "${RUNTIME_IMAGE}" \
+  python -c 'import urllib.request; urllib.request.urlopen("https://github.com", timeout=4)' \
+  >/dev/null 2>&1
+
+direct_rc=$?
+
+set -e
+
+if [[ "${direct_rc}" -eq 0 ]]; then
+  echo "Isolation failure: direct helper egress still works." >&2
+  exit 1
+fi
+
+echo "Direct helper internet egress is denied."
 
 if ! docker run --rm \
   --network "${HELPER_NETWORK}" \
@@ -161,14 +228,70 @@ if ! docker run --rm \
   --security-opt no-new-privileges:true \
   --memory 128m \
   --pids-limit 32 \
+  -e "HTTPS_PROXY=${PROXY_URL}" \
+  -e "https_proxy=${PROXY_URL}" \
+  -e "HTTP_PROXY=${PROXY_URL}" \
+  -e "http_proxy=${PROXY_URL}" \
+  -e "NO_PROXY=" \
+  -e "no_proxy=" \
   "${RUNTIME_IMAGE}" \
-  python -c 'import urllib.request; response=urllib.request.urlopen("https://github.com", timeout=5); raise SystemExit(0 if response.status == 200 else 1)' \
-  >/dev/null 2>&1; then
-  echo "Workspace helper egress network cannot reach GitHub." >&2
+  python -c 'import urllib.request; r=urllib.request.urlopen("https://github.com", timeout=7); raise SystemExit(0 if r.status == 200 else 1)' \
+  >/dev/null 2>&1
+then
+  echo "Restricted proxy cannot reach github.com." >&2
   exit 1
 fi
 
-echo "GitHub helper egress probe passed."
+echo "github.com:443 succeeds through the fixed proxy."
+
+set +e
+
+docker run --rm \
+  --network "${HELPER_NETWORK}" \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=134217728 \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --memory 128m \
+  --pids-limit 32 \
+  -e "HTTPS_PROXY=${PROXY_URL}" \
+  -e "https_proxy=${PROXY_URL}" \
+  -e "HTTP_PROXY=${PROXY_URL}" \
+  -e "http_proxy=${PROXY_URL}" \
+  -e "NO_PROXY=" \
+  -e "no_proxy=" \
+  "${RUNTIME_IMAGE}" \
+  python -c 'import urllib.request; urllib.request.urlopen("https://example.com", timeout=5)' \
+  >/dev/null 2>&1
+
+non_github_rc=$?
+
+set -e
+
+if [[ "${non_github_rc}" -eq 0 ]]; then
+  echo "Isolation failure: non-GitHub destination was allowed." >&2
+  exit 1
+fi
+
+echo "Non-GitHub destinations are denied."
+
+if docker network inspect \
+  "${LEGACY_HELPER_NETWORK}" \
+  >/dev/null 2>&1
+then
+  legacy_endpoints="$(
+    docker network inspect \
+      "${LEGACY_HELPER_NETWORK}" \
+      --format '{{len .Containers}}'
+  )"
+
+  if [[ "${legacy_endpoints}" != "0" ]]; then
+    echo "Legacy broad helper network still has endpoints." >&2
+    exit 1
+  fi
+fi
+
+echo "GitHub helper restricted-egress proxy preflight passed."
 
 if docker ps --format '{{.Names}}' | grep -Eq '^application-workspace-1$'; then
   echo "Legacy shared workspace container is still running." >&2

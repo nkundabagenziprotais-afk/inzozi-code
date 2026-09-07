@@ -1,0 +1,12 @@
+[project]
+name = "inzozi-code-workspace-egress-proxy"
+version = "0.1.0"
+description = "GitHub-only HTTPS CONNECT proxy for ephemeral workspace helpers"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.4,<9"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

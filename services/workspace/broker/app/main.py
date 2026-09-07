@@ -19,7 +19,9 @@ QUOTA_HELPER_IMAGE = os.getenv("WORKSPACE_QUOTA_HELPER_IMAGE", "inzozi-code-work
 QUOTA_STORAGE_ROOT = os.getenv("WORKSPACE_QUOTA_STORAGE_ROOT", "/srv/inzozi-code/workspace-data").rstrip("/")
 MANAGER_SERVICE_HOST = os.getenv("WORKSPACE_MANAGER_SERVICE_HOST", "workspace-manager")
 BROKER_TOKEN = os.getenv("WORKSPACE_BROKER_TOKEN", "")
-EGRESS_NETWORK = os.getenv("WORKSPACE_EGRESS_NETWORK", "inzozi-workspace-egress")
+EGRESS_NETWORK = "inzozi-workspace-helper-restricted"
+EGRESS_UPLINK_NETWORK = "inzozi-workspace-egress-uplink"
+EGRESS_PROXY_URL = "http://workspace-egress-proxy:3128"
 MAX_ACTIVE = int(os.getenv("WORKSPACE_MAX_ACTIVE", "8"))
 DISK_LIMIT_BYTES = int(os.getenv("WORKSPACE_DISK_LIMIT_BYTES", str(2 * 1024 * 1024 * 1024)))
 RUNTIME_MEMORY = os.getenv("WORKSPACE_RUNTIME_MEMORY_LIMIT", "4g")
@@ -144,18 +146,84 @@ def _workspace_labels(workspace_id: str, expires_at: int, network_name: str, pro
     }
 
 
+def _egress_proxy_container():
+    project = _compose_project()
+    labels = [f"{LABEL_ROLE}=workspace-egress-proxy"]
+
+    if project:
+        labels.append(f"com.docker.compose.project={project}")
+
+    containers = docker_client.containers.list(
+        all=True,
+        filters={"label": labels},
+    )
+
+    if len(containers) != 1:
+        raise RuntimeError(
+            "Workspace GitHub egress proxy identity is unavailable"
+        )
+
+    return containers[0]
+
+
 def _ensure_egress_network() -> None:
     try:
-        network = docker_client.networks.get(EGRESS_NETWORK)
-        if bool(network.attrs.get("Internal")):
-            raise RuntimeError("Workspace helper egress network is unexpectedly internal")
-    except NotFound:
-        docker_client.networks.create(
-            EGRESS_NETWORK,
-            driver="bridge",
-            internal=False,
-            labels={LABEL_KIND: "workspace-helper-egress"},
+        helper_network = docker_client.networks.get(EGRESS_NETWORK)
+        uplink_network = docker_client.networks.get(
+            EGRESS_UPLINK_NETWORK
         )
+    except NotFound as exc:
+        raise RuntimeError(
+            "Restricted workspace helper networks are unavailable"
+        ) from exc
+
+    helper_network.reload()
+    uplink_network.reload()
+
+    if not bool(helper_network.attrs.get("Internal")):
+        raise RuntimeError(
+            "Workspace helper egress network must be internal"
+        )
+
+    if bool(uplink_network.attrs.get("Internal")):
+        raise RuntimeError(
+            "Workspace proxy uplink must provide outbound connectivity"
+        )
+
+    proxy = _egress_proxy_container()
+
+    helper_endpoints = (
+        helper_network.attrs.get("Containers") or {}
+    )
+    uplink_endpoints = (
+        uplink_network.attrs.get("Containers") or {}
+    )
+
+    if proxy.id not in helper_endpoints:
+        raise RuntimeError(
+            "Workspace GitHub egress proxy is not on helper network"
+        )
+
+    if proxy.id not in uplink_endpoints:
+        raise RuntimeError(
+            "Workspace GitHub egress proxy is not on uplink network"
+        )
+
+    for container_id in helper_endpoints:
+        if container_id == proxy.id:
+            continue
+
+        try:
+            endpoint = docker_client.containers.get(container_id)
+        except NotFound:
+            continue
+
+        if (
+            endpoint.labels or {}
+        ).get(LABEL_KIND) != "workspace-helper":
+            raise RuntimeError(
+                "Unexpected container attached to helper egress"
+            )
 
 
 def _connect_manager_to(network) -> None:
@@ -312,14 +380,46 @@ def _helper_run(
     root_bootstrap: bool = False,
 ) -> bytes:
     if module not in {"app.bootstrap", "app.remote_push"}:
-        raise RuntimeError("Unsupported workspace helper module")
+        raise RuntimeError(
+            "Unsupported workspace helper module"
+        )
+
+    if network_name not in {None, EGRESS_NETWORK}:
+        raise RuntimeError(
+            "Unsupported workspace helper network"
+        )
+
+    helper_environment = dict(environment)
+
+    if network_name == EGRESS_NETWORK:
+        helper_environment.update(
+            {
+                "HTTPS_PROXY": EGRESS_PROXY_URL,
+                "https_proxy": EGRESS_PROXY_URL,
+                "HTTP_PROXY": EGRESS_PROXY_URL,
+                "http_proxy": EGRESS_PROXY_URL,
+                "NO_PROXY": "",
+                "no_proxy": "",
+            }
+        )
+
     kwargs = {
         "image": RUNTIME_IMAGE,
         "command": ["python", "-m", module],
-        "environment": environment,
-        "volumes": {volume_name: {"bind": "/workspace", "mode": "rw"}},
+        "environment": helper_environment,
+        "volumes": {
+            volume_name: {
+                "bind": "/workspace",
+                "mode": "rw",
+            }
+        },
         "read_only": True,
-        "tmpfs": {"/tmp": "rw,noexec,nosuid,nodev,size=134217728"},
+        "tmpfs": {
+            "/tmp": (
+                "rw,noexec,nosuid,nodev,"
+                "size=134217728"
+            )
+        },
         "cap_drop": ["ALL"],
         "security_opt": ["no-new-privileges:true"],
         "mem_limit": "1g",
@@ -328,19 +428,26 @@ def _helper_run(
         "remove": True,
         "stdout": True,
         "stderr": True,
-        "labels": {LABEL_KIND: "workspace-helper"},
+        "labels": {
+            LABEL_KIND: "workspace-helper",
+        },
     }
+
     if network_name:
         kwargs["network"] = network_name
     else:
         kwargs["network_mode"] = "none"
+
     if root_bootstrap:
         kwargs["user"] = "0:0"
         kwargs["cap_add"] = ["CHOWN"]
+
     try:
         return docker_client.containers.run(**kwargs)
     except ContainerError as exc:
-        raise RuntimeError("Workspace helper action failed safely") from exc
+        raise RuntimeError(
+            "Workspace helper action failed safely"
+        ) from exc
 
 
 def _volume_size_sync(volume_name: str) -> int:
@@ -572,7 +679,7 @@ def _isolation_status_sync() -> dict:
         "dedicated_networks": len(network_names) == len(workspaces),
         "all_runtime_networks_internal": all_networks_internal,
         "runtime_egress": "denied",
-        "git_helper_egress": "ephemeral-github-actions-only",
+        "git_helper_egress": "github-only-connect-proxy",
         "disk_quota_bytes": DISK_LIMIT_BYTES,
         "disk_quota_mode": "xfs-project-hard",
         "quota_filesystem": quota_status.get("filesystem"),
