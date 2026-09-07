@@ -1,5 +1,12 @@
 import Editor from '@monaco-editor/react'
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import RemoveRepositoryDialog from './RemoveRepositoryDialog'
+import {
+  loadRepositoryHistory,
+  rememberRepository,
+  removeRememberedRepository,
+  type RepositoryHistoryItem,
+} from './repositoryHistory'
 
 type Mode = 'ask' | 'plan' | 'design' | 'build' | 'debug' | 'review' | 'deploy'
 type BottomTab = 'terminal' | 'status' | 'diff' | 'review'
@@ -111,6 +118,13 @@ type PullRequestResult = {
   merged: boolean
   deployment_started: boolean
 }
+type RecoverableWorkspace = {
+  workspace_id: string
+  repository_url: string
+  ref?: string | null
+  created_at: string
+  runtime_status: 'ready' | 'unavailable'
+}
 type ApiError = { detail?: string }
 
 const DEFAULT_PROJECT_POLICY: ProjectPolicy = {
@@ -197,6 +211,14 @@ function approvalTime(value: string) {
   }
 }
 
+function historyTime(value: string) {
+  try {
+    return new Date(value).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return 'recently'
+  }
+}
+
 export default function App() {
   const [mode, setMode] = useState<Mode>('plan')
   const [prompt, setPrompt] = useState('Review this project and propose the safest implementation plan.')
@@ -207,7 +229,11 @@ export default function App() {
 
   const [repositoryUrl, setRepositoryUrl] = useState('')
   const [repositoryRef, setRepositoryRef] = useState('')
+  const [repositoryHistory, setRepositoryHistory] = useState<RepositoryHistoryItem[]>(() => loadRepositoryHistory())
+  const [repositoryPendingRemoval, setRepositoryPendingRemoval] = useState<RepositoryHistoryItem | null>(null)
   const [workspaceId, setWorkspaceId] = useState('')
+  const [recoverableWorkspaces, setRecoverableWorkspaces] = useState<RecoverableWorkspace[]>([])
+  const [recoveryError, setRecoveryError] = useState('')
   const [treePath, setTreePath] = useState('')
   const [entries, setEntries] = useState<TreeEntry[]>([])
   const [selectedPath, setSelectedPath] = useState('')
@@ -240,13 +266,32 @@ export default function App() {
   const promptRef = useRef<HTMLTextAreaElement>(null)
   const dirty = fileContent !== savedContent
   const projectName = useMemo(() => repoLabel(repositoryUrl), [repositoryUrl])
+  const activeProjectName = workspaceId ? projectName : 'No repository connected'
   const availableProviders = providers.filter((provider) => provider.configured).length
+  const visibleRecoverableWorkspaces = useMemo(
+    () => recoverableWorkspaces.filter((item) => item.workspace_id !== workspaceId),
+    [recoverableWorkspaces, workspaceId],
+  )
 
   useEffect(() => {
     api<{ providers: ProviderItem[] }>('/api/v1/agent/providers')
       .then((payload) => setProviders(payload.providers))
       .catch(() => setProviders([]))
   }, [])
+
+  useEffect(() => {
+    void loadRecoverableWorkspaces()
+  }, [])
+
+  async function loadRecoverableWorkspaces() {
+    try {
+      const payload = await api<{ workspaces: RecoverableWorkspace[] }>('/api/v1/workspaces/recovery')
+      setRecoverableWorkspaces(Array.isArray(payload.workspaces) ? payload.workspaces : [])
+      setRecoveryError('')
+    } catch {
+      setRecoveryError('Unable to check for recoverable workspaces. Retry before opening another workspace.')
+    }
+  }
 
   async function loadTree(id: string, path = '') {
     const payload = await api<{ path: string; entries: TreeEntry[] }>(`/api/v1/workspaces/${id}/tree?path=${encodeURIComponent(path)}`)
@@ -290,19 +335,23 @@ export default function App() {
     setGitReviewMessage(message)
   }
 
-  async function connectRepository(event: FormEvent) {
-    event.preventDefault()
-    if (!repositoryUrl.trim()) return
+  async function createWorkspace(repositoryUrlValue: string, repositoryRefValue: string) {
+    const normalizedUrl = repositoryUrlValue.trim().replace(/\.git$/, '')
+    const normalizedRef = repositoryRefValue.trim()
+    if (!normalizedUrl) return
+    setRepositoryUrl(normalizedUrl)
+    setRepositoryRef(normalizedRef)
     setBusy(true)
     setWorkspaceMessage('Creating an isolated workspace and cloning the repository…')
     try {
       const payload = await api<{ workspace_id: string; status: string }>('/api/v1/workspaces', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repository_url: repositoryUrl.trim(), ref: repositoryRef.trim() || null }),
+        body: JSON.stringify({ repository_url: normalizedUrl, ref: normalizedRef || null }),
       })
       setWorkspaceId(payload.workspace_id)
-      setProjectPolicy(loadProjectPolicy(repositoryUrl.trim()))
+      setRepositoryHistory(rememberRepository(normalizedUrl, normalizedRef))
+      setProjectPolicy(loadProjectPolicy(normalizedUrl))
       setBranchName(`feature/inzozi-change-${payload.workspace_id.slice(0, 6)}`)
       setCommitApproval(null)
       setPushApproval(null)
@@ -320,6 +369,39 @@ export default function App() {
     } finally {
       setBusy(false)
     }
+  }
+
+  async function connectRepository(event: FormEvent) {
+    event.preventDefault()
+    await createWorkspace(repositoryUrl, repositoryRef)
+  }
+
+  async function reopenRepository(item: RepositoryHistoryItem) {
+    if (workspaceId || busy) return
+    await createWorkspace(item.repository_url, item.ref)
+  }
+
+  function requestRepositoryRemoval(item: RepositoryHistoryItem) {
+    if (busy) return
+    setRepositoryPendingRemoval(item)
+  }
+
+  function cancelRepositoryRemoval() {
+    if (busy) return
+    setRepositoryPendingRemoval(null)
+  }
+
+  function confirmRepositoryRemoval() {
+    const item = repositoryPendingRemoval
+    if (!item || busy || typeof window === 'undefined') return
+    setRepositoryHistory(removeRememberedRepository(item.repository_url, item.ref))
+    window.localStorage.removeItem(projectPolicyKey(item.repository_url))
+    if (!workspaceId && repositoryUrl.replace(/\.git$/, '').toLowerCase() === item.repository_url.toLowerCase() && repositoryRef.trim() === item.ref) {
+      setRepositoryUrl('')
+      setRepositoryRef('')
+    }
+    setRepositoryPendingRemoval(null)
+    setWorkspaceMessage('Repository removed from Inzozi Code history. The GitHub repository was not changed.')
   }
 
   async function openEntry(entry: TreeEntry) {
@@ -572,33 +654,87 @@ export default function App() {
     }
   }
 
-  async function disconnectWorkspace() {
-    if (!workspaceId) return
+  function clearActiveWorkspaceState() {
+    setWorkspaceId('')
+    setEntries([])
+    setTreePath('')
+    setSelectedPath('')
+    setFileContent('')
+    setSavedContent('')
+    setFileSha('')
+    setGitStatus('No workspace connected.')
+    setGitDiff('No diff available.')
+    setGitReview(null)
+    setCommitApproval(null)
+    setPushApproval(null)
+    setPullRequestApproval(null)
+    setPullRequestResult(null)
+    setLastLocalCommitSha('')
+    setLastPushedCommitSha('')
+    setTerminalOutput('Workspace commands will appear here.')
+  }
+
+  async function resumeRecoveredWorkspace(item: RecoverableWorkspace) {
+    if (workspaceId || busy || item.runtime_status !== 'ready') return
     setBusy(true)
+    setWorkspaceMessage(`Resuming workspace ${item.workspace_id.slice(0, 8)}…`)
     try {
-      await api<void>(`/api/v1/workspaces/${workspaceId}`, { method: 'DELETE' })
-    } finally {
-      setWorkspaceId('')
-      setEntries([])
-      setTreePath('')
-      setSelectedPath('')
-      setFileContent('')
-      setSavedContent('')
-      setFileSha('')
-      setGitStatus('No workspace connected.')
-      setGitDiff('No diff available.')
-      setGitReview(null)
+      await loadTree(item.workspace_id)
+      await refreshGit(item.workspace_id)
+      const review = await loadGitReview(item.workspace_id)
+      const normalizedUrl = item.repository_url.replace(/\.git$/, '')
+      const restoredRef = review?.branch?.trim() || item.ref?.trim() || ''
+      setWorkspaceId(item.workspace_id)
+      setRepositoryUrl(normalizedUrl)
+      setRepositoryRef(restoredRef)
+      setProjectPolicy(loadProjectPolicy(normalizedUrl))
+      setBranchName(`feature/inzozi-change-${item.workspace_id.slice(0, 6)}`)
       setCommitApproval(null)
       setPushApproval(null)
       setPullRequestApproval(null)
       setPullRequestResult(null)
       setLastLocalCommitSha('')
       setLastPushedCommitSha('')
-      setTerminalOutput('Workspace commands will appear here.')
-      setWorkspaceMessage('Workspace destroyed. Connect another repository when ready.')
+      setGitReviewMessage('Review changes before creating a local commit. Remote push and draft PR are separately approval-gated.')
+      setAgentMessage('Aquila now has guarded repository context. Build and Debug runs create a preflight checkpoint before agent edits.')
+      setWorkspaceMessage(`Resumed workspace ${item.workspace_id.slice(0, 8)}. No new workspace was created.`)
+      await loadRecoverableWorkspaces()
+    } catch (error) {
+      clearActiveWorkspaceState()
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Unable to resume recoverable workspace.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function disconnectRecoverableWorkspace(item: RecoverableWorkspace) {
+    if (busy) return
+    setBusy(true)
+    try {
+      await api<void>(`/api/v1/workspaces/${item.workspace_id}`, { method: 'DELETE' })
+      await loadRecoverableWorkspaces()
+      setWorkspaceMessage(`Disconnected recoverable workspace ${item.workspace_id.slice(0, 8)}.`)
+    } catch (error) {
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Unable to disconnect recoverable workspace.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function disconnectWorkspace() {
+    if (!workspaceId) return
+    setBusy(true)
+    try {
+      await api<void>(`/api/v1/workspaces/${workspaceId}`, { method: 'DELETE' })
+      clearActiveWorkspaceState()
       setGitReviewMessage('Review changes before creating a local commit. Remote push and draft PR are separately approval-gated.')
       setAgentMessage('Connect a repository to give Aquila a real workspace context.')
       setBottomCollapsed(true)
+      setWorkspaceMessage('Workspace destroyed. Repository kept in Recent repositories for easy reuse.')
+      await loadRecoverableWorkspaces()
+    } catch (error) {
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Unable to disconnect workspace.')
+    } finally {
       setBusy(false)
     }
   }
@@ -634,7 +770,7 @@ export default function App() {
         body: JSON.stringify({
           mode,
           prompt,
-          project_name: projectName,
+          project_name: activeProjectName,
           workspace_id: workspaceId || null,
           project_policy: projectPolicy,
         }),
@@ -688,7 +824,7 @@ export default function App() {
           <span className="mark">IC</span>
           <div><strong>Inzozi Code</strong><small>AI software engineering workspace</small></div>
         </div>
-        <div className="project-pill"><span className={`status-dot ${workspaceId ? '' : 'idle'}`} /> {projectName} {repositoryRef && <span className="branch">{repositoryRef}</span>}</div>
+        <div className="project-pill"><span className={`status-dot ${workspaceId ? '' : 'idle'}`} /> {activeProjectName} {workspaceId && repositoryRef && <span className="branch">{repositoryRef}</span>}</div>
         <div className="agent-name"><span className="agent-status">Aquila</span><span>●</span></div>
       </header>
 
@@ -702,6 +838,90 @@ export default function App() {
                 <strong>Open a workspace</strong>
                 <p>Bring a GitHub repository into an isolated, guarded workspace.</p>
               </div>
+              {recoveryError && (
+                <div className="recoverable-workspaces-error" role="alert">
+                  <p>{recoveryError}</p>
+                  <button type="button" onClick={() => void loadRecoverableWorkspaces()} disabled={busy}>
+                    Retry
+                  </button>
+                </div>
+              )}
+              {visibleRecoverableWorkspaces.length > 0 && (
+                <div className="recoverable-workspaces" aria-label="Recoverable workspaces">
+                  <div className="recoverable-workspaces-heading">
+                    <strong>Recoverable workspaces</strong>
+                    <small>Still active on the server</small>
+                  </div>
+                  <p className="recoverable-workspaces-copy">
+                    These workspaces are still active even though this browser no longer has their session state.
+                  </p>
+                  {visibleRecoverableWorkspaces.map((item) => (
+                    <div className="recoverable-workspace-row" key={item.workspace_id}>
+                      <div className="recoverable-workspace-meta">
+                        <strong>{repoLabel(item.repository_url)}</strong>
+                        <small>
+                          {item.ref || 'default branch'} · {historyTime(item.created_at)} · {item.workspace_id.slice(0, 8)} · {item.runtime_status}
+                        </small>
+                        {item.runtime_status === 'unavailable' && (
+                          <small className="recoverable-workspace-unavailable">
+                            Runtime unavailable. Resume is disabled, but you can securely disconnect this workspace.
+                          </small>
+                        )}
+                      </div>
+                      <div className="recoverable-workspace-actions">
+                        <button
+                          type="button"
+                          className="recoverable-workspace-resume"
+                          onClick={() => resumeRecoveredWorkspace(item)}
+                          disabled={busy || item.runtime_status !== 'ready'}
+                        >
+                          Resume workspace
+                        </button>
+                        <button
+                          type="button"
+                          className="recoverable-workspace-disconnect"
+                          onClick={() => disconnectRecoverableWorkspace(item)}
+                          disabled={busy}
+                        >
+                          Disconnect
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {repositoryHistory.length > 0 && (
+                <div className="recent-repositories" aria-label="Recent repositories">
+                  <div className="recent-repositories-heading">
+                    <strong>Recent repositories</strong>
+                    <small>Remembered on this browser</small>
+                  </div>
+                  {repositoryHistory.map((item) => (
+                    <div className="recent-repository-row" key={`${item.repository_url}:${item.ref}`}>
+                      <button
+                        type="button"
+                        className="recent-repository-open"
+                        onClick={() => reopenRepository(item)}
+                        disabled={busy}
+                        title={`Open ${repoLabel(item.repository_url)}`}
+                      >
+                        <strong>{repoLabel(item.repository_url)}</strong>
+                        <small>{item.ref || 'default branch'} · {historyTime(item.last_opened_at)}</small>
+                      </button>
+                      <button
+                        type="button"
+                        className="recent-repository-remove"
+                        onClick={() => requestRepositoryRemoval(item)}
+                        disabled={busy}
+                        aria-label={`Remove ${repoLabel(item.repository_url)} from recent repositories`}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <small className="recent-repositories-note">Remove forgets the entry and local project preferences. It never deletes the GitHub repository.</small>
+                </div>
+              )}
               <div className="github-selector-placeholder">
                 <div><span>GitHub</span><strong>Repository picker</strong></div>
                 <small>Account and organization selection will activate with the GitHub App.</small>
@@ -775,7 +995,7 @@ export default function App() {
                   <span><strong>Human approval</strong><small>Commit · push · draft PR</small></span>
                   <span><strong>Merge disabled</strong><small>Production remains separate</small></span>
                 </div>
-                <small className="welcome-note">Manual GitHub URL is enabled for this private alpha. Account-based repository selection comes with the GitHub App.</small>
+                <small className="welcome-note">Manual GitHub URL is enabled for this private alpha. Connected repositories can be remembered locally for quick reuse without storing credentials.</small>
               </div>
             </div>
           )}
@@ -939,6 +1159,16 @@ export default function App() {
       </section>
 
       <footer><span>Workspace: {workspaceId ? `guarded · ${workspaceId.slice(0, 8)}` : 'disconnected'}</span><span>Route: {agentRoute}</span><span>Git: commit + push + draft PR approval gates</span><span className="healthy">● merge disabled</span></footer>
+
+      {repositoryPendingRemoval && (
+        <RemoveRepositoryDialog
+          repositoryName={repoLabel(repositoryPendingRemoval.repository_url)}
+          repositoryRef={repositoryPendingRemoval.ref}
+          busy={busy}
+          onCancel={cancelRepositoryRemoval}
+          onConfirm={confirmRepositoryRemoval}
+        />
+      )}
     </main>
   )
 }

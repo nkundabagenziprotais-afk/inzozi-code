@@ -70,6 +70,17 @@ variable "public_web_cidrs" {
   default     = ["0.0.0.0/0", "::/0"]
 }
 
+variable "workspace_quota_volume_size_gb" {
+  description = "Physical XFS staging pool for hard per-workspace project quotas. This is separate from each workspace's byte limit."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.workspace_quota_volume_size_gb >= 20 && var.workspace_quota_volume_size_gb <= 1024 && floor(var.workspace_quota_volume_size_gb) == var.workspace_quota_volume_size_gb
+    error_message = "workspace_quota_volume_size_gb must be a whole number between 20 and 1024 GB."
+  }
+}
+
 variable "labels" {
   description = "Additional non-secret Hetzner resource labels."
   type        = map(string)
