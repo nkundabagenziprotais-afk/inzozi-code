@@ -1,0 +1,53 @@
+#cloud-config
+users:
+  - default
+  - name: ${admin_user}
+    gecos: Inzozi Code Staging Operator
+    groups:
+      - sudo
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+ssh_pwauth: false
+disable_root: true
+package_update: true
+package_upgrade: false
+
+packages:
+  - ca-certificates
+  - curl
+  - git
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/60-inzozi-staging.conf
+    owner: root:root
+    permissions: '0644'
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+      PubkeyAuthentication yes
+
+  - path: /etc/inzozi-code-staging
+    owner: root:root
+    permissions: '0644'
+    content: |
+      environment=staging
+      lifecycle=ephemeral
+      application=inzozi-code
+
+runcmd:
+  - [mkdir, -p, /srv/inzozi-code]
+  - [mkdir, -p, /srv/inzozi-code/secrets]
+  - [mkdir, -p, /srv/inzozi-code/backups]
+  - [mkdir, -p, /srv/inzozi-code/application]
+  - [chown, -R, "${admin_user}:${admin_user}", /srv/inzozi-code]
+  - [chmod, '0700', /srv/inzozi-code/secrets]
+  - [chmod, '0700', /srv/inzozi-code/backups]
+  - [systemctl, reload, ssh]
+  - [touch, /var/lib/cloud/instance/inzozi-code-ready]
+
+final_message: "Inzozi Code ephemeral staging base host is ready. Run the repository staging bootstrap next."

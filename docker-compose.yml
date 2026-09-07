@@ -17,38 +17,131 @@ services:
       APP_NAME: ${APP_NAME:-Inzozi Code}
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
-      AQUILA_PROVIDER: ${AQUILA_PROVIDER:-mock}
-      AQUILA_MODEL: ${AQUILA_MODEL:-mock-v0}
-      WORKSPACE_SERVICE_URL: ${WORKSPACE_SERVICE_URL:-http://workspace:8100}
+      AQUILA_PROVIDER: ${AQUILA_PROVIDER:-openai}
+      AQUILA_MODEL: ${AQUILA_MODEL:-gpt-5.6}
+      AQUILA_MAX_TURNS: ${AQUILA_MAX_TURNS:-12}
+      OPENAI_DEFAULT_MODEL: ${OPENAI_DEFAULT_MODEL:-gpt-5.6}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      WORKSPACE_SERVICE_URL: ${WORKSPACE_SERVICE_URL:-http://workspace-manager:8200}
+      WORKSPACE_OWNERSHIP_ENFORCED: ${WORKSPACE_OWNERSHIP_ENFORCED:-false}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_OWNER: ${GITHUB_APP_OWNER:-}
+      GITHUB_APP_DEFAULT_INSTALLATION_ID: ${GITHUB_APP_DEFAULT_INSTALLATION_ID:-}
+      GITHUB_APP_PRIVATE_KEY_PATH: ${GITHUB_APP_PRIVATE_KEY_PATH:-}
+      AUTH_ENABLED: ${AUTH_ENABLED:-false}
+      AUTH_BOOTSTRAP_EMAIL: ${AUTH_BOOTSTRAP_EMAIL:-}
+      AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH:-}
+      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:-}
+      AUTH_BOOTSTRAP_ROLE: ${AUTH_BOOTSTRAP_ROLE:-platform_owner}
+      AUTH_ORGANIZATION_ID: ${AUTH_ORGANIZATION_ID:-inzozi-digital}
+      AUTH_SESSION_TTL_MINUTES: ${AUTH_SESSION_TTL_MINUTES:-480}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_started
-      workspace:
+      workspace-manager:
         condition: service_healthy
     networks:
       - inzozi
 
-  workspace:
+  workspace-manager:
     build:
-      context: ./services/workspace/runtime
+      context: ./services/workspace/manager
     restart: unless-stopped
     environment:
-      WORKSPACE_ROOT: /workspaces
-      WORKSPACE_MAX_FILE_BYTES: ${WORKSPACE_MAX_FILE_BYTES:-1048576}
-      WORKSPACE_MAX_OUTPUT_BYTES: ${WORKSPACE_MAX_OUTPUT_BYTES:-65536}
-    volumes:
-      - workspace_data:/workspaces
+      WORKSPACE_API_SERVICE_HOST: api
+      WORKSPACE_BROKER_URL: http://workspace-broker:8300
+      WORKSPACE_BROKER_TOKEN: ${WORKSPACE_BROKER_TOKEN:-development-only-broker-token-change-me}
+      WORKSPACE_TTL_SECONDS: ${WORKSPACE_TTL_SECONDS:-28800}
+    depends_on:
+      workspace-broker:
+        condition: service_healthy
+    labels:
+      com.inzozi.code.role: workspace-manager
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=134217728
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 0.5
+    pids_limit: 128
+    sysctls:
+      net.ipv4.ip_forward: "0"
+      net.ipv6.conf.all.forwarding: "0"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/health', timeout=3)"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 12
     networks:
       - inzozi
+      - workspace-control
+
+  workspace-broker:
+    build:
+      context: ./services/workspace/broker
+    restart: unless-stopped
+    environment:
+      WORKSPACE_RUNTIME_IMAGE: ${WORKSPACE_RUNTIME_IMAGE:-inzozi-code-workspace-runtime:local}
+      WORKSPACE_QUOTA_HELPER_IMAGE: ${WORKSPACE_QUOTA_HELPER_IMAGE:-inzozi-code-workspace-quota-helper:local}
+      WORKSPACE_QUOTA_STORAGE_ROOT: ${WORKSPACE_QUOTA_STORAGE_ROOT:-/srv/inzozi-code/workspace-data}
+      WORKSPACE_MANAGER_SERVICE_HOST: workspace-manager
+      WORKSPACE_BROKER_TOKEN: ${WORKSPACE_BROKER_TOKEN:-development-only-broker-token-change-me}
+      WORKSPACE_EGRESS_NETWORK: ${WORKSPACE_EGRESS_NETWORK:-inzozi-workspace-egress}
+      WORKSPACE_MAX_ACTIVE: ${WORKSPACE_MAX_ACTIVE:-8}
+      WORKSPACE_DISK_LIMIT_BYTES: ${WORKSPACE_DISK_LIMIT_BYTES:-2147483648}
+      WORKSPACE_RUNTIME_MEMORY_LIMIT: ${WORKSPACE_RUNTIME_MEMORY_LIMIT:-4g}
+      WORKSPACE_RUNTIME_CPUS: ${WORKSPACE_RUNTIME_CPUS:-2.0}
+      WORKSPACE_RUNTIME_PIDS_LIMIT: ${WORKSPACE_RUNTIME_PIDS_LIMIT:-256}
+      WORKSPACE_MAX_FILE_BYTES: ${WORKSPACE_MAX_FILE_BYTES:-1048576}
+      WORKSPACE_MAX_OUTPUT_BYTES: ${WORKSPACE_MAX_OUTPUT_BYTES:-65536}
+      WORKSPACE_MAX_SEARCH_FILE_BYTES: ${WORKSPACE_MAX_SEARCH_FILE_BYTES:-524288}
+      WORKSPACE_MAX_CHECKPOINT_BYTES: ${WORKSPACE_MAX_CHECKPOINT_BYTES:-104857600}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      com.inzozi.code.role: workspace-broker
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=67108864
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 128
+    sysctls:
+      net.ipv4.ip_forward: "0"
+      net.ipv6.conf.all.forwarding: "0"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8300/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - workspace-control
+
+  workspace-runtime-image:
+    image: ${WORKSPACE_RUNTIME_IMAGE:-inzozi-code-workspace-runtime:local}
+    build:
+      context: ./services/workspace/runtime
+    profiles:
+      - workspace-runtime-image
+
+  workspace-quota-helper-image:
+    image: ${WORKSPACE_QUOTA_HELPER_IMAGE:-inzozi-code-workspace-quota-helper:local}
+    build:
+      context: ./services/workspace/quota-helper
+    profiles:
+      - workspace-runtime-image
 
   postgres:
     image: postgres:16-alpine
@@ -85,15 +178,17 @@ services:
     volumes:
       - ./infrastructure/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     networks:
       - inzozi
 
 volumes:
   postgres_data:
   redis_data:
-  workspace_data:
 
 networks:
   inzozi:
     driver: bridge
+  workspace-control:
+    driver: bridge
+    internal: true
