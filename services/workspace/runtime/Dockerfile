@@ -12,6 +12,7 @@ WORKDIR /runtime
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir .
 COPY app ./app
+RUN chmod 0555 /runtime/app/git_askpass.sh
 
 RUN useradd --create-home --uid 10002 workspace \
     && mkdir -p /workspaces \
@@ -19,4 +20,5 @@ RUN useradd --create-home --uid 10002 workspace \
 USER workspace
 
 EXPOSE 8100
+ENTRYPOINT ["python", "-m", "app.entrypoint"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100"]
