@@ -16,6 +16,8 @@ from app.integrations.github_app import (
     default_installation_for,
     github_app_configured,
 )
+from app.security.auth import AuthPrincipal
+from app.security.workspace_ownership import list_accessible_active_workspaces
 
 router = APIRouter(prefix="/v1/workspaces", tags=["workspaces"])
 settings = get_settings()
@@ -167,6 +169,38 @@ async def runtime_status() -> dict:
     payload = await _request("GET", "/health") or {"status": "unknown"}
     payload["github_app_configured"] = github_app_configured()
     return payload
+
+
+@router.get("/recovery")
+async def list_recoverable_workspaces(request: Request) -> dict:
+    principal = getattr(request.state, "principal", None)
+    if not isinstance(principal, AuthPrincipal):
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    ownerships = list_accessible_active_workspaces(principal)
+    workspaces: list[dict] = []
+    for ownership in ownerships:
+        item = {
+            "workspace_id": ownership.workspace_id,
+            "repository_url": ownership.repository_url,
+            "ref": None,
+            "created_at": ownership.created_at.isoformat(),
+            "runtime_status": "unavailable",
+        }
+        try:
+            metadata = await _request("GET", f"/v1/workspaces/{ownership.workspace_id}/metadata") or {}
+        except HTTPException:
+            workspaces.append(item)
+            continue
+
+        item["runtime_status"] = "ready"
+        ref = metadata.get("ref") if isinstance(metadata, dict) else None
+        if isinstance(ref, str):
+            cleaned = ref.strip()
+            item["ref"] = cleaned or None
+        workspaces.append(item)
+
+    return {"workspaces": workspaces}
 
 
 @router.post("")
