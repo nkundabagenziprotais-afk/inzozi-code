@@ -125,6 +125,116 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .primary-action { border: 1px solid #567e6f !important; border-radius: 8px !important; background: var(--accent-soft) !important; color: var(--accent-strong) !important; cursor: pointer; font-weight: 650; }
 .connect-form > .primary-action { padding: 9px 10px; font-size: 11px; }
 
+.recoverable-workspaces-error {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid #543b3d;
+  border-radius: 9px;
+  background: rgba(230, 170, 170, .05);
+}
+.recoverable-workspaces-error p {
+  margin: 0;
+  color: var(--danger);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.recoverable-workspaces-error button {
+  align-self: flex-start;
+  border: 1px solid #543b3d;
+  border-radius: 7px;
+  background: #121819;
+  color: var(--danger);
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 9px;
+}
+.recoverable-workspaces {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #0f1516;
+}
+.recoverable-workspaces-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.recoverable-workspaces-heading strong {
+  font-size: 11px;
+  color: #d6dcda;
+}
+.recoverable-workspaces-heading small,
+.recoverable-workspaces-copy {
+  margin: 0;
+  color: var(--muted-2);
+  font-size: 9px;
+  line-height: 1.45;
+}
+.recoverable-workspace-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0c1112;
+}
+.recoverable-workspace-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.recoverable-workspace-meta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #dce2df;
+  font-size: 10px;
+}
+.recoverable-workspace-meta small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 9px;
+}
+.recoverable-workspace-unavailable {
+  white-space: normal !important;
+  color: var(--warning) !important;
+  line-height: 1.4;
+}
+.recoverable-workspace-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+}
+.recoverable-workspace-resume {
+  border: 1px solid #567e6f;
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  padding: 6px 7px;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 650;
+}
+.recoverable-workspace-disconnect {
+  border: 1px solid #543b3d;
+  border-radius: 7px;
+  background: rgba(230, 170, 170, .05);
+  color: var(--danger);
+  padding: 6px 7px;
+  cursor: pointer;
+  font-size: 9px;
+}
+
 .editor { min-width: 0; min-height: 0; position: relative; border-right: 1px solid var(--border); overflow: hidden; background: #0f1415; }
 .tabs { justify-content: flex-start; background: #101617; }
 .tabs button { height: 40px; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 14px; color: var(--muted); border-right: 1px solid var(--border); font-size: 11px; }

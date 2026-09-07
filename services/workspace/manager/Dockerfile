@@ -8,8 +8,11 @@ COPY pyproject.toml ./
 RUN pip install --no-cache-dir .
 COPY app ./app
 
-# This is a trusted control-plane container. It intentionally runs as root only
-# so it can access the host Docker socket. AI/workspace containers never receive
-# that socket and run separately as the unprivileged workspace user.
+RUN useradd --create-home --uid 10003 manager \
+    && chown -R manager:manager /manager
+USER manager
+
+# The manager is intentionally unprivileged and has no Docker socket. All
+# Docker lifecycle operations are delegated to the narrow workspace broker.
 EXPOSE 8200
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8200"]

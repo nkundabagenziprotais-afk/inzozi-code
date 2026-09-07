@@ -11,8 +11,9 @@ cd "${APP_ROOT}"
 COMPOSE=(docker compose --env-file "${ENV_FILE}" -f docker-compose.yml -f "${STAGING_COMPOSE}")
 
 manager_id="$("${COMPOSE[@]}" ps -q workspace-manager)"
-if [[ -z "${manager_id}" ]]; then
-  echo "Workspace manager container is not running." >&2
+broker_id="$("${COMPOSE[@]}" ps -q workspace-broker)"
+if [[ -z "${manager_id}" || -z "${broker_id}" ]]; then
+  echo "Workspace manager and broker must both be running." >&2
   exit 1
 fi
 
@@ -21,40 +22,109 @@ if ! docker image inspect "${RUNTIME_IMAGE}" >/dev/null 2>&1; then
   exit 1
 fi
 
-manager_socket_mounts="$(docker inspect "${manager_id}" --format '{{range .Mounts}}{{if eq .Destination "/var/run/docker.sock"}}1{{end}}{{end}}')"
-if [[ "${manager_socket_mounts}" != "1" ]]; then
-  echo "Trusted workspace manager does not have the expected Docker control socket." >&2
+quota_image="$(docker inspect "${broker_id}" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^WORKSPACE_QUOTA_HELPER_IMAGE=//p' | head -n1)"
+quota_root="$(docker inspect "${broker_id}" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^WORKSPACE_QUOTA_STORAGE_ROOT=//p' | head -n1)"
+if [[ -z "${quota_image}" || -z "${quota_root}" ]]; then
+  echo "Workspace XFS quota helper/storage configuration is missing from the broker." >&2
+  exit 1
+fi
+if ! docker image inspect "${quota_image}" >/dev/null 2>&1; then
+  echo "Workspace XFS quota helper image is missing: ${quota_image}" >&2
   exit 1
 fi
 
-echo "Trusted workspace manager has Docker control; workspace runtimes do not inherit the socket."
+manager_socket_mounts="$(docker inspect "${manager_id}" --format '{{range .Mounts}}{{if eq .Destination "/var/run/docker.sock"}}1{{end}}{{end}}')"
+broker_socket_mounts="$(docker inspect "${broker_id}" --format '{{range .Mounts}}{{if eq .Destination "/var/run/docker.sock"}}1{{end}}{{end}}')"
+manager_uid="$(docker exec "${manager_id}" id -u)"
+if [[ -n "${manager_socket_mounts}" || "${broker_socket_mounts}" != "1" || "${manager_uid}" == "0" ]]; then
+  echo "Workspace control-plane privilege boundary is invalid." >&2
+  exit 1
+fi
 
-status_json="$(docker exec "${manager_id}" python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8200/v1/isolation/status", timeout=5).read().decode())')"
+echo "Workspace manager is unprivileged and socket-free; only the narrow broker has Docker control."
+
+control_internal="$(docker network inspect application_workspace-control --format '{{.Internal}}' 2>/dev/null || true)"
+if [[ "${control_internal}" != "true" ]]; then
+  control_network="$(docker inspect "${broker_id}" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | grep 'workspace-control' | head -n1)"
+  if [[ -z "${control_network}" ]] || [[ "$(docker network inspect "${control_network}" --format '{{.Internal}}')" != "true" ]]; then
+    echo "Workspace broker control network must be internal." >&2
+    exit 1
+  fi
+fi
+
+echo "Workspace broker control network is internal."
+
+status_json="$(docker exec "${manager_id}" python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8200/v1/isolation/status", timeout=8).read().decode())')"
 STATUS_JSON="${status_json}" python3 - <<'PY'
 import json
 import os
 
 payload = json.loads(os.environ["STATUS_JSON"])
 assert payload["status"] == "ok"
-assert payload["mode"] == "dedicated-per-workspace-containers"
+assert payload["mode"] == "brokered-dedicated-workspaces"
 assert payload["workspace_socket_mounts"] == 0
+assert payload["manager_docker_socket"] is False
+assert payload["manager_privilege"] == "unprivileged"
+assert payload["control_plane"] == "narrow-docker-broker"
 assert payload["runtime_egress"] == "denied"
-assert int(payload["ttl_seconds"]) > 0
 assert int(payload["disk_quota_bytes"]) > 0
+assert payload["disk_quota_mode"] == "xfs-project-hard"
+assert payload["quota_filesystem"] == "xfs"
+assert payload["quota_project_enforcement"] is True
+assert payload["all_active_workspaces_hard_quoted"] is True
+assert payload["unique_active_project_ids"] is True
 assert int(payload["max_active_workspaces"]) > 0
 if payload["active_workspaces"]:
     assert payload["dedicated_networks"] is True
     assert payload["all_runtime_networks_internal"] is True
+    assert all(item["disk_quota"] == "xfs-project-hard" for item in payload["workspaces"])
 PY
 
-echo "Workspace manager reports dedicated containers, zero workspace Docker sockets, TTL and disk limits."
+echo "Brokered workspace isolation status reports XFS project hard quotas."
+
+quota_probe="$(docker run --rm \
+  --network none \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=67108864 \
+  --user 0:0 \
+  --cap-drop ALL \
+  --cap-add SYS_ADMIN \
+  --cap-add CHOWN \
+  --security-opt no-new-privileges:true \
+  --memory 256m \
+  --pids-limit 64 \
+  -v "${quota_root}:/quota-root:rw" \
+  "${quota_image}" probe)"
+
+QUOTA_PROBE="${quota_probe}" python3 - <<'PY'
+import json
+import os
+
+payload = json.loads(os.environ["QUOTA_PROBE"].strip().splitlines()[-1])
+assert payload["status"] == "ok"
+assert payload["hard_limit_enforced"] is True
+assert payload["failure_errno"] == "ENOSPC"
+assert int(payload["probe_limit_bytes"]) == 1024 * 1024
+PY
+
+echo "XFS hard quota probe passed: a 2 MiB write was blocked by a 1 MiB project limit with ENOSPC."
+
+set +e
+docker exec "$("${COMPOSE[@]}" ps -q api)" python -c 'import socket; socket.getaddrinfo("workspace-broker", 8300)' >/dev/null 2>&1
+api_broker_rc=$?
+set -e
+if [[ "${api_broker_rc}" -eq 0 ]]; then
+  echo "Isolation failure: API service can resolve the privileged workspace broker." >&2
+  exit 1
+fi
+
+echo "API service cannot directly resolve the privileged broker."
 
 probe_network="inzozi-preflight-isolated-$$"
 cleanup() {
   docker network rm "${probe_network}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-
 docker network create --internal "${probe_network}" >/dev/null
 set +e
 docker run --rm \
@@ -106,4 +176,4 @@ if docker ps --format '{{.Names}}' | grep -Eq '^application-workspace-1$'; then
 fi
 
 echo "Legacy shared workspace runtime is absent."
-echo "Dedicated workspace preflight passed. Public staging remains disabled pending live workspace E2E and residual host-disk/manager-broker review."
+echo "Dedicated workspace preflight passed. Public staging remains disabled pending helper-egress allowlisting, durable Redis controls, and escape/exhaustion testing."

@@ -1,43 +1,42 @@
-import time
-
 import pytest
+from fastapi import HTTPException
 
-from app.main import (
-    GITHUB_HTTPS_RE,
-    _is_expired,
-    _network_name,
-    _runtime_name,
-    _volume_name,
-    _workspace_id,
-)
+import app.main as manager
 
 
-class FakeContainer:
-    def __init__(self, expires_at: int):
-        self.labels = {"com.inzozi.code.expires_at": str(expires_at)}
-
-
-def test_workspace_resource_names_are_id_scoped():
+def test_runtime_name_is_workspace_scoped():
     workspace_id = "a" * 32
-    assert _runtime_name(workspace_id) == f"inzozi-ws-{workspace_id}"
-    assert _volume_name(workspace_id) == f"inzozi-ws-vol-{workspace_id}"
-    assert _network_name(workspace_id) == f"inzozi-ws-net-{workspace_id}"
+    assert manager._runtime_name(workspace_id) == f"inzozi-ws-{workspace_id}"
 
 
 def test_invalid_workspace_id_is_rejected():
     with pytest.raises(ValueError):
-        _workspace_id("../../docker.sock")
-
-
-def test_ttl_expiry_is_fail_closed():
-    now = int(time.time())
-    assert _is_expired(FakeContainer(now - 1)) is True
-    assert _is_expired(FakeContainer(now + 60)) is False
-    assert _is_expired(type("Broken", (), {"labels": {}})()) is True
+        manager._workspace_id("../../docker.sock")
 
 
 def test_clone_allowlist_is_github_https_only():
-    assert GITHUB_HTTPS_RE.fullmatch("https://github.com/inzozi/example")
-    assert not GITHUB_HTTPS_RE.fullmatch("http://github.com/inzozi/example")
-    assert not GITHUB_HTTPS_RE.fullmatch("https://example.com/inzozi/example")
-    assert not GITHUB_HTTPS_RE.fullmatch("file:///etc/passwd")
+    assert manager.GITHUB_HTTPS_RE.fullmatch("https://github.com/inzozi/example")
+    assert not manager.GITHUB_HTTPS_RE.fullmatch("http://github.com/inzozi/example")
+    assert not manager.GITHUB_HTTPS_RE.fullmatch("https://example.com/inzozi/example")
+    assert not manager.GITHUB_HTTPS_RE.fullmatch("file:///etc/passwd")
+
+
+def test_remote_push_remains_limited_to_safe_nonproduction_branches():
+    assert manager.SAFE_PUSH_BRANCH_RE.fullmatch("feature/reviewed-change")
+    assert manager.SAFE_PUSH_BRANCH_RE.fullmatch("fix/login-loop")
+    assert not manager.SAFE_PUSH_BRANCH_RE.fullmatch("main")
+    assert not manager.SAFE_PUSH_BRANCH_RE.fullmatch("production")
+    assert not manager.SAFE_PUSH_BRANCH_RE.fullmatch("../../escape")
+
+
+def test_manager_fails_closed_without_broker_secret(monkeypatch):
+    monkeypatch.setattr(manager, "BROKER_TOKEN", "")
+    with pytest.raises(HTTPException) as exc:
+        manager._broker_headers()
+    assert exc.value.status_code == 503
+
+
+def test_manager_uses_bearer_auth_for_broker(monkeypatch):
+    token = "a" * 64
+    monkeypatch.setattr(manager, "BROKER_TOKEN", token)
+    assert manager._broker_headers() == {"Authorization": f"Bearer {token}"}

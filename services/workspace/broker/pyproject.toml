@@ -1,12 +1,12 @@
 [project]
-name = "inzozi-code-workspace-manager"
-version = "0.2.0"
-description = "Unprivileged manager for brokered dedicated Inzozi Code workspaces"
+name = "inzozi-code-workspace-broker"
+version = "0.1.0"
+description = "Narrow privileged Docker broker for Inzozi Code workspace lifecycle operations"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.116,<1",
   "uvicorn[standard]>=0.35,<1",
-  "httpx>=0.28,<1",
+  "docker>=7.1,<8",
 ]
 
 [project.optional-dependencies]
