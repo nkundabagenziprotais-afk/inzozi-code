@@ -21,9 +21,10 @@ MAX_OUTPUT_BYTES = int(os.getenv("WORKSPACE_MAX_OUTPUT_BYTES", "65536"))
 MAX_SEARCH_FILE_BYTES = int(os.getenv("WORKSPACE_MAX_SEARCH_FILE_BYTES", "524288"))
 MAX_CHECKPOINT_BYTES = int(os.getenv("WORKSPACE_MAX_CHECKPOINT_BYTES", str(100 * 1024 * 1024)))
 GITHUB_HTTPS_RE = re.compile(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$")
+SAFE_PUSH_BRANCH_RE = re.compile(r"^(feature|fix|ui|hotfix|deploy)/[a-z0-9][a-z0-9._-]{2,80}$")
 SEARCH_SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "vendor", "dist", "build", ".next", ".nuxt", "coverage"}
 
-app = FastAPI(title="Inzozi Code Workspace Runtime", version="0.1.4")
+app = FastAPI(title="Inzozi Code Workspace Runtime", version="0.1.5")
 
 
 class CreateWorkspaceRequest(BaseModel):
@@ -46,6 +47,12 @@ class CreateCheckpointRequest(BaseModel):
     label: str | None = Field(default=None, max_length=120)
 
 
+class PushRequest(BaseModel):
+    branch: str
+    expected_head: str = Field(pattern=r"^[0-9a-f]{40,64}$")
+    git_token: SecretStr = Field(repr=False)
+
+
 def _workspace_path(workspace_id: str) -> Path:
     if not re.fullmatch(r"[0-9a-f]{32}", workspace_id):
         raise HTTPException(status_code=400, detail="Invalid workspace id")
@@ -60,6 +67,23 @@ def _repo_path(workspace_id: str) -> Path:
     if not path.is_dir():
         raise HTTPException(status_code=409, detail="Workspace repository is unavailable")
     return path
+
+
+def _metadata_path(workspace_id: str) -> Path:
+    return _workspace_path(workspace_id) / "workspace.json"
+
+
+def _read_workspace_metadata(workspace_id: str) -> dict:
+    path = _metadata_path(workspace_id)
+    if not path.is_file():
+        raise HTTPException(status_code=409, detail="Workspace metadata is unavailable")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=409, detail="Workspace metadata is invalid") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=409, detail="Workspace metadata is invalid")
+    return payload
 
 
 def _checkpoints_path(workspace_id: str) -> Path:
@@ -167,7 +191,7 @@ def _restore_snapshot(snapshot: Path, repo: Path) -> None:
 @app.get("/health")
 def health() -> dict:
     WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
-    return {"status": "ok", "service": "workspace-runtime", "mode": "guarded-recipes-checkpoints"}
+    return {"status": "ok", "service": "workspace-runtime", "mode": "guarded-recipes-checkpoints-push"}
 
 
 @app.post("/v1/workspaces", status_code=201)
@@ -206,7 +230,19 @@ def create_workspace(request: CreateWorkspaceRequest) -> dict:
         if authenticated:
             detail += ". Confirm the GitHub App installation has access to this repository."
         raise HTTPException(status_code=502, detail=detail)
+
+    metadata = {
+        "repository_url": request.repository_url,
+        "ref": request.ref,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    (root / "workspace.json").write_text(json.dumps(metadata), encoding="utf-8")
     return {"workspace_id": workspace_id, "repository_url": request.repository_url, "ref": request.ref, "status": "ready"}
+
+
+@app.get("/v1/workspaces/{workspace_id}/metadata")
+def workspace_metadata(workspace_id: str) -> dict:
+    return _read_workspace_metadata(workspace_id)
 
 
 @app.get("/v1/workspaces/{workspace_id}/tree")
@@ -334,6 +370,73 @@ def git_status(workspace_id: str) -> dict:
 @app.get("/v1/workspaces/{workspace_id}/git/diff")
 def git_diff(workspace_id: str) -> dict:
     return _run(("git", "diff", "--no-ext-diff", "--minimal"), _repo_path(workspace_id), 30)
+
+
+@app.post("/v1/workspaces/{workspace_id}/git/push")
+def git_push(workspace_id: str, request: PushRequest) -> dict:
+    if not SAFE_PUSH_BRANCH_RE.fullmatch(request.branch):
+        raise HTTPException(status_code=400, detail="Remote push is limited to safe Inzozi Code branches")
+
+    root = _workspace_path(workspace_id)
+    repo = _repo_path(workspace_id)
+    metadata = _read_workspace_metadata(workspace_id)
+    repository_url = metadata.get("repository_url")
+    if not isinstance(repository_url, str) or not GITHUB_HTTPS_RE.fullmatch(repository_url):
+        raise HTTPException(status_code=409, detail="Workspace repository metadata is invalid")
+
+    branch_result = _run(("git", "branch", "--show-current"), repo, 30)
+    head_result = _run(("git", "rev-parse", "HEAD"), repo, 30)
+    status_result = _run(("git", "status", "--porcelain"), repo, 30)
+    branch = branch_result.get("output", "").strip()
+    head = head_result.get("output", "").strip()
+    status = status_result.get("output", "").strip()
+
+    if branch != request.branch:
+        raise HTTPException(status_code=409, detail="Current local branch differs from the approved push branch")
+    if head != request.expected_head:
+        raise HTTPException(status_code=409, detail="Current local commit differs from the approved push commit")
+    if status:
+        raise HTTPException(status_code=409, detail="Working tree must be clean before remote push")
+
+    auth_env, askpass = _git_auth_environment(root, request.git_token.get_secret_value())
+    try:
+        result = _run(
+            (
+                "git",
+                "-c", "credential.helper=",
+                "push",
+                "--porcelain",
+                "origin",
+                f"HEAD:refs/heads/{request.branch}",
+            ),
+            repo,
+            120,
+            extra_env=auth_env,
+        )
+    finally:
+        askpass.unlink(missing_ok=True)
+
+    _audit(
+        workspace_id,
+        "git.push",
+        {
+            "repository_url": repository_url,
+            "branch": request.branch,
+            "head": head,
+            "exit_code": result.get("exit_code"),
+            "timed_out": result.get("timed_out", False),
+            "authenticated": True,
+        },
+    )
+    if result.get("exit_code") != 0:
+        raise HTTPException(status_code=502, detail="Git push failed. No force push was attempted.")
+    return {
+        "status": "pushed",
+        "repository_url": repository_url,
+        "branch": request.branch,
+        "commit_sha": head,
+        "forced": False,
+    }
 
 
 @app.post("/v1/workspaces/{workspace_id}/checkpoints", status_code=201)
