@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     aquila_provider: str = "mock"
     aquila_model: str = "mock-v0"
     workspace_service_url: str = "http://workspace:8100"
+    workspace_ownership_enforced: bool = False
     github_app_id: str = ""
     github_app_owner: str = ""
     github_app_default_installation_id: str = ""
