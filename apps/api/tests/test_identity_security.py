@@ -222,7 +222,7 @@ class FakeIdentityStore:
         bump = (
             new_role != stored.user.role
             or new_org != stored.user.organization_id
-            or (new_status == "disabled" and stored.user.status != "disabled")
+            or new_status != stored.user.status
         )
         stored.user = replace(
             stored.user,
@@ -534,6 +534,68 @@ def test_session_version_invalidation_paths(monkeypatch):
         client.cookies.clear()
         client.cookies.set(SESSION_COOKIE, cookie_b)
         assert client.get("/v1/auth/me").status_code == 401
+    get_settings.cache_clear()
+    configure_auth_state_client(None)
+
+
+def test_status_transition_invalidates_existing_session_cookie(monkeypatch):
+    store = FakeIdentityStore()
+    store.seed(
+        user_id=OWNER_ID,
+        email="owner@inzozidigital.com",
+        organization_id="inzozi-digital",
+        role="platform_owner",
+        password="a-secure-staging-password",
+    )
+    store.seed(
+        user_id=DEV_A_ID,
+        email="deva@inzozidigital.com",
+        organization_id="inzozi-digital",
+        role="developer",
+        password="a-secure-staging-password",
+    )
+    _configure_database(monkeypatch, store)
+
+    with TestClient(_app()) as client:
+        login = client.post(
+            "/v1/auth/login",
+            json={"email": "deva@inzozidigital.com", "password": "a-secure-staging-password"},
+        )
+        assert login.status_code == 200
+        cookie_a = login.cookies.get(SESSION_COOKIE)
+        assert cookie_a
+        assert client.get("/v1/auth/me").status_code == 200
+
+        client.cookies.clear()
+        _login(client, "owner@inzozidigital.com")
+        pending = client.patch(f"/v1/auth/users/{DEV_A_ID}", json={"status": "pending"})
+        assert pending.status_code == 200
+        assert pending.json()["user"]["status"] == "pending"
+        assert pending.json()["user"]["session_version"] == 1
+
+        client.cookies.clear()
+        client.cookies.set(SESSION_COOKIE, cookie_a)
+        assert client.get("/v1/auth/me").status_code == 401
+
+        _login(client, "owner@inzozidigital.com")
+        reactivated = client.patch(f"/v1/auth/users/{DEV_A_ID}", json={"status": "active"})
+        assert reactivated.status_code == 200
+        assert reactivated.json()["user"]["status"] == "active"
+        assert reactivated.json()["user"]["session_version"] == 2
+
+        client.cookies.clear()
+        client.cookies.set(SESSION_COOKIE, cookie_a)
+        assert client.get("/v1/auth/me").status_code == 401
+
+        fresh = client.post(
+            "/v1/auth/login",
+            json={"email": "deva@inzozidigital.com", "password": "a-secure-staging-password"},
+        )
+        assert fresh.status_code == 200
+        assert fresh.json()["session_version"] == 2
+        assert fresh.cookies.get(SESSION_COOKIE) != cookie_a
+        assert client.get("/v1/auth/me").status_code == 200
+        assert client.get("/v1/auth/me").json()["session_version"] == 2
     get_settings.cache_clear()
     configure_auth_state_client(None)
 

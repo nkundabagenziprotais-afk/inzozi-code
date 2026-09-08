@@ -542,7 +542,7 @@ def update_user(
                 bump_session = (
                     new_role != str(existing["role"])
                     or new_org != str(existing["organization_id"])
-                    or (new_status == "disabled" and str(existing["status"]) != "disabled")
+                    or new_status != str(existing["status"])
                 )
 
                 demoting_or_disabling_owner = (

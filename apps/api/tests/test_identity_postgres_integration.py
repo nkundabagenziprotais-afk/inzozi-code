@@ -405,3 +405,32 @@ def test_concurrent_platform_owner_demotion_leaves_one_active():
         )
         remaining = int(cursor.fetchone()["count"])
     assert remaining >= 1
+
+
+def test_any_status_transition_increments_session_version():
+    owner = seed_platform_owner(
+        email="owner@inzozidigital.com",
+        password_hash=hash_password("a-secure-staging-password", salt=b"p" * 16),
+        organization_id="inzozi-digital",
+    )
+    _, token = create_invitation(
+        email="deva@inzozidigital.com",
+        organization_id="inzozi-digital",
+        role="developer",
+        created_by_user_id=owner.user_id,
+    )
+    developer = activate_invitation(
+        token=token,
+        password_hash=hash_password("developer-password", salt=b"d" * 16),
+    )
+    before = developer.session_version
+    assert developer.status == "active"
+
+    pending = update_user(user_id=developer.user_id, status="pending")
+    assert pending.status == "pending"
+    assert pending.session_version == before + 1
+
+    active_again = update_user(user_id=developer.user_id, status="active")
+    assert active_again.status == "active"
+    assert active_again.session_version == before + 2
+    assert active_again.session_version > before
