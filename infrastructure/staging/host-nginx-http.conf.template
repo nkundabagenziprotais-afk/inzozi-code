@@ -76,7 +76,7 @@ server {
 
     # Workspace actions may execute tests/build commands and therefore share
     # the expensive-operation request budget.
-    location ~ ^/api/v1/workspaces/[0-9a-f]{32}/actions$ {
+    location ~ "^/api/v1/workspaces/[0-9a-f]{32}/actions$" {
         limit_req zone=inzozi_expensive_per_ip burst=5 nodelay;
         limit_conn inzozi_conn_per_ip 4;
         client_max_body_size 16k;

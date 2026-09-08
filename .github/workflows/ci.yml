@@ -246,13 +246,25 @@ jobs:
               "limit_conn_status 429;",
               "location = /api/v1/auth/login",
               "location = /api/v1/agent/run",
+              'location ~ "^/api/v1/workspaces/[0-9a-f]{32}/actions$"',
               "client_max_body_size 16k;",
+          )
+
+          unquoted_workspace_regex = (
+              "location ~ "
+              "^/api/v1/workspaces/[0-9a-f]{32}/actions$ {"
           )
 
           for template_name, template in (
               ("HTTP", http_template),
               ("HTTPS", https_template),
           ):
+              if unquoted_workspace_regex in template:
+                  raise SystemExit(
+                      f"{template_name} workspace-action regex "
+                      "must be quoted for Nginx parsing"
+                  )
+
               missing = [
                   item
                   for item in required_ingress
