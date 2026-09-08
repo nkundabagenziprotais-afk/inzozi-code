@@ -1,0 +1,5 @@
+Issue #40 governance acceptance probe.
+
+This file is intentionally harmless.
+It exists only to confirm that a normal PR with all required checks green becomes eligible for explicit manual merge.
+Probe token: ba0b7884d4
