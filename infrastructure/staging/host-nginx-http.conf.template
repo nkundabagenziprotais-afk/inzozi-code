@@ -1,3 +1,14 @@
+# Per-source request budgets.
+#
+# These keys deliberately use $binary_remote_addr. During current PRIVATE
+# STAGING that is the directly connected operator. A future public edge MUST
+# establish an authenticated real-IP boundary before public activation so
+# $remote_addr represents the real client rather than an arbitrary header.
+limit_req_zone $binary_remote_addr zone=inzozi_login_per_ip:10m rate=12r/m;
+limit_req_zone $binary_remote_addr zone=inzozi_api_per_ip:10m rate=15r/s;
+limit_req_zone $binary_remote_addr zone=inzozi_expensive_per_ip:10m rate=30r/m;
+limit_conn_zone $binary_remote_addr zone=inzozi_conn_per_ip:10m;
+
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -11,7 +22,96 @@ server {
     listen [::]:80;
     server_name code-staging.inzozidigital.com;
 
+    limit_req_status 429;
+    limit_conn_status 429;
+    limit_req_log_level warn;
+    limit_conn_log_level warn;
+
+    # Bound connection floods while retaining ample capacity for a normal
+    # browser using HTTP keepalive.
+    limit_conn inzozi_conn_per_ip 32;
+
     client_max_body_size 20m;
+
+    # Authentication is deliberately much tighter than general API traffic.
+    # This bounds PBKDF2 work even when an attacker rotates email addresses.
+    location = /api/v1/auth/login {
+        limit_req zone=inzozi_login_per_ip burst=4 nodelay;
+        limit_conn inzozi_conn_per_ip 4;
+        client_max_body_size 16k;
+
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout 300s;
+    }
+
+    # Agent execution is materially more expensive than ordinary API reads.
+    location = /api/v1/agent/run {
+        limit_req zone=inzozi_expensive_per_ip burst=5 nodelay;
+        limit_conn inzozi_conn_per_ip 4;
+        client_max_body_size 64k;
+
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout 300s;
+    }
+
+    # Workspace actions may execute tests/build commands and therefore share
+    # the expensive-operation request budget.
+    location ~ ^/api/v1/workspaces/[0-9a-f]{32}/actions$ {
+        limit_req zone=inzozi_expensive_per_ip burst=5 nodelay;
+        limit_conn inzozi_conn_per_ip 4;
+        client_max_body_size 16k;
+
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout 300s;
+    }
+
+    location /api/ {
+        limit_req zone=inzozi_api_per_ip burst=45 nodelay;
+        limit_conn inzozi_conn_per_ip 16;
+
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout 300s;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:8080;

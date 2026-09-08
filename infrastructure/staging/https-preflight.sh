@@ -150,6 +150,54 @@ printf '%s\n' "${HEADERS}" |
 printf '%s\n' "${HEADERS}" |
   grep -Eiq '^Permissions-Policy:[[:space:]]*camera=\(\), microphone=\(\), geolocation=\(\)'
 
+CSP="$(
+  printf '%s\n' "${HEADERS}" |
+    sed -n \
+      's/^[Cc]ontent-[Ss]ecurity-[Pp]olicy:[[:space:]]*//p' |
+    head -n 1
+)"
+
+[[ -n "${CSP}" ]] ||
+  fail "Content-Security-Policy header is missing"
+
+for directive in \
+  "default-src 'self'" \
+  "script-src 'self'" \
+  "object-src 'none'" \
+  "base-uri 'self'" \
+  "form-action 'self'" \
+  "frame-ancestors 'self'" \
+  "connect-src 'self'" \
+  "worker-src 'self' blob:"
+do
+  printf '%s\n' "${CSP}" |
+    grep -Fq "${directive}" ||
+    fail "CSP is missing required directive: ${directive}"
+done
+
+if printf '%s\n' "${CSP}" |
+  grep -Fq "'unsafe-eval'"
+then
+  fail "CSP must not allow unsafe-eval"
+fi
+
+NGINX_EFFECTIVE="$(
+  sudo -n nginx -T 2>/dev/null
+)"
+
+for control in \
+  'zone=inzozi_login_per_ip:10m rate=12r/m' \
+  'zone=inzozi_api_per_ip:10m rate=15r/s' \
+  'zone=inzozi_expensive_per_ip:10m rate=30r/m' \
+  'zone=inzozi_conn_per_ip:10m' \
+  'limit_req_status 429' \
+  'limit_conn_status 429'
+do
+  printf '%s\n' "${NGINX_EFFECTIVE}" |
+    grep -Fq "${control}" ||
+    fail "effective Nginx config is missing ingress control: ${control}"
+done
+
 HTTPS_STATUS="$(
   curl \
     --silent \
@@ -177,6 +225,8 @@ echo "UNKNOWN_HOST_REJECTION=PASS"
 echo "HTTP_TO_HTTPS_REDIRECT=PASS"
 echo "HTTPS_HEALTH=PASS"
 echo "SECURITY_HEADERS=PASS"
+echo "CONTENT_SECURITY_POLICY=PASS"
+echo "INGRESS_ABUSE_CONTROLS=PASS"
 echo "AUTH_COOKIE_SECURE=PASS"
 echo "PUBLIC_DNS_REQUIRED=NO"
 echo "HTTPS_PREFLIGHT=PASS"
