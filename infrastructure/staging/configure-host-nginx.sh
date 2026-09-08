@@ -214,60 +214,71 @@ if ! systemctl reload nginx; then
   fail "nginx reload failed; previous configuration restored"
 fi
 
-FAILED=0
+FUNCTIONAL_CHECK_ATTEMPTS=40
+FUNCTIONAL_CHECK_SLEEP_SECONDS="0.25"
 
-RAW_HTTP="$(
-  curl \
-    --silent \
-    --show-error \
-    --max-time 8 \
-    --header 'Host: unexpected.invalid' \
-    --output /dev/null \
-    --write-out '%{http_code}' \
-    http://127.0.0.1/health ||
-    true
-)"
+RAW_HTTP=""
+DOMAIN_HTTP=""
+UNKNOWN_HTTPS=""
+DOMAIN_HTTPS=""
 
-[[ "${RAW_HTTP}" == "404" ]] || FAILED=1
-
-if [[ "${MODE}" == "http" ]]; then
-
-  DOMAIN_HTTP="$(
+functional_check_once() {
+  RAW_HTTP="$(
     curl \
       --silent \
       --show-error \
-      --max-time 8 \
-      --header "Host: ${DOMAIN}" \
+      --connect-timeout 1 \
+      --max-time 2 \
+      --header 'Host: unexpected.invalid' \
       --output /dev/null \
       --write-out '%{http_code}' \
       http://127.0.0.1/health ||
       true
   )"
 
-  [[ "${DOMAIN_HTTP}" == "200" ]] || FAILED=1
+  if [[ "${MODE}" == "http" ]]; then
 
-else
+    DOMAIN_HTTP="$(
+      curl \
+        --silent \
+        --show-error \
+        --connect-timeout 1 \
+        --max-time 2 \
+        --header "Host: ${DOMAIN}" \
+        --output /dev/null \
+        --write-out '%{http_code}' \
+        http://127.0.0.1/health ||
+        true
+    )"
+
+    if [[ "${RAW_HTTP}" == "404" &&
+          "${DOMAIN_HTTP}" == "200" ]]; then
+      return 0
+    fi
+
+    return 1
+  fi
 
   DOMAIN_HTTP="$(
     curl \
       --silent \
       --show-error \
-      --max-time 8 \
+      --connect-timeout 1 \
+      --max-time 2 \
       --header "Host: ${DOMAIN}" \
       --output /dev/null \
       --write-out '%{http_code}' \
       http://127.0.0.1/health ||
       true
   )"
-
-  [[ "${DOMAIN_HTTP}" == "308" ]] || FAILED=1
 
   UNKNOWN_HTTPS="$(
     curl \
       --silent \
       --show-error \
       --insecure \
-      --max-time 8 \
+      --connect-timeout 1 \
+      --max-time 2 \
       --resolve "unexpected.invalid:443:127.0.0.1" \
       --output /dev/null \
       --write-out '%{http_code}' \
@@ -275,14 +286,13 @@ else
       true
   )"
 
-  [[ "${UNKNOWN_HTTPS}" == "404" ]] || FAILED=1
-
   DOMAIN_HTTPS="$(
     curl \
       --silent \
       --show-error \
       --cacert "${CA_CERT}" \
-      --max-time 8 \
+      --connect-timeout 1 \
+      --max-time 2 \
       --resolve "${DOMAIN}:443:127.0.0.1" \
       --output /dev/null \
       --write-out '%{http_code}' \
@@ -290,17 +300,51 @@ else
       true
   )"
 
-  [[ "${DOMAIN_HTTPS}" == "200" ]] || FAILED=1
-fi
+  if [[ "${RAW_HTTP}" == "404" &&
+        "${DOMAIN_HTTP}" == "308" &&
+        "${UNKNOWN_HTTPS}" == "404" &&
+        "${DOMAIN_HTTPS}" == "200" ]]; then
+    return 0
+  fi
 
-if [[ "${FAILED}" != "0" ]]; then
+  return 1
+}
+
+FUNCTIONAL_OK=0
+
+for attempt in $(
+  seq 1 "${FUNCTIONAL_CHECK_ATTEMPTS}"
+)
+do
+  if functional_check_once; then
+    FUNCTIONAL_OK=1
+
+    echo \
+      "Host Nginx functional validation passed on attempt ${attempt}/${FUNCTIONAL_CHECK_ATTEMPTS}."
+
+    break
+  fi
+
+  if [[ "${attempt}" -lt "${FUNCTIONAL_CHECK_ATTEMPTS}" ]]; then
+    sleep "${FUNCTIONAL_CHECK_SLEEP_SECONDS}"
+  fi
+done
+
+if [[ "${FUNCTIONAL_OK}" != "1" ]]; then
+  echo \
+    "Functional validation observations: mode=${MODE} raw_http=${RAW_HTTP:-none} domain_http=${DOMAIN_HTTP:-none} unknown_https=${UNKNOWN_HTTPS:-none} domain_https=${DOMAIN_HTTPS:-none}" \
+    >&2
+
   rollback
 
   if ! systemctl reload nginx; then
-    echo "WARNING: rollback reload also failed." >&2
+    echo \
+      "WARNING: rollback reload also failed." \
+      >&2
   fi
 
-  fail "functional validation failed; previous configuration restored"
+  fail \
+    "functional validation failed after bounded reload-handoff retries; previous configuration restored"
 fi
 
 cleanup_files

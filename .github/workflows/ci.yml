@@ -145,6 +145,40 @@ jobs:
                   "Ubuntu default site must be removed before candidate nginx -t"
               )
 
+          retry_fragments = (
+              'FUNCTIONAL_CHECK_ATTEMPTS=40',
+              'FUNCTIONAL_CHECK_SLEEP_SECONDS="0.25"',
+              'functional_check_once()',
+              'seq 1 "${FUNCTIONAL_CHECK_ATTEMPTS}"',
+              'sleep "${FUNCTIONAL_CHECK_SLEEP_SECONDS}"',
+              'Functional validation observations:',
+          )
+
+          missing_retry_fragments = [
+              fragment
+              for fragment in retry_fragments
+              if fragment not in installer
+          ]
+
+          if missing_retry_fragments:
+              raise SystemExit(
+                  "Missing Nginx reload-handoff retry controls: "
+                  + repr(missing_retry_fragments)
+              )
+
+          reload_position = installer.index(
+              'if ! systemctl reload nginx; then'
+          )
+
+          retry_position = installer.index(
+              'functional_check_once()'
+          )
+
+          if retry_position < reload_position:
+              raise SystemExit(
+                  "Functional retry loop must run after successful Nginx reload"
+              )
+
           for reviewed_path in (
               "infrastructure/staging/configure-host-nginx.sh",
               "infrastructure/staging/deploy-staging.sh",
@@ -176,6 +210,7 @@ jobs:
               )
 
           print("HOST_NGINX_ACTIVATION_ORDER=PASS")
+          print("HOST_NGINX_RELOAD_HANDOFF_RETRY=PASS")
           print("REVIEWED_SHA_BOUNDARIES=PASS")
           print("PRIVATE_WEB_CIDR_REJECTION=PASS")
           PY
