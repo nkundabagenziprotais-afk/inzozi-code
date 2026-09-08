@@ -142,12 +142,18 @@ def _git_auth_environment(root: Path, token: str) -> tuple[dict[str, str], Path]
         encoding="utf-8",
     )
     askpass.chmod(0o700)
-    return {
-        "GIT_ASKPASS": str(askpass),
-        "GIT_ASKPASS_REQUIRE": "force",
-        "INZOZI_GIT_USERNAME": "x-access-token",
-        "INZOZI_GIT_TOKEN": token,
-    }, askpass
+    from app.git_credentials import _base_process_environment
+
+    env = _base_process_environment()
+    env.update(
+        {
+            "GIT_ASKPASS": str(askpass),
+            "GIT_ASKPASS_REQUIRE": "force",
+            "INZOZI_GIT_USERNAME": "x-access-token",
+            "INZOZI_GIT_TOKEN": token,
+        }
+    )
+    return env, askpass
 
 
 def _tree_size(root: Path) -> int:

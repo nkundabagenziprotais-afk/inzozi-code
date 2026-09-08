@@ -19,6 +19,7 @@ from app.security.auth import (
     verify_password,
 )
 from app.security.identity_store import (
+    IdentityAuthorizationError,
     IdentityConflictError,
     IdentityStoreError,
     IdentityValidationError,
@@ -338,6 +339,8 @@ async def admin_create_invitation(payload: InvitationRequest, request: Request) 
         )
     except IdentityConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except IdentityAuthorizationError as exc:
+        raise HTTPException(status_code=403, detail="Your role does not allow this action") from exc
     except IdentityValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except IdentityStoreError as exc:
@@ -386,6 +389,8 @@ async def admin_patch_user(user_id: str, payload: PatchUserRequest, request: Req
                 status=payload.status,
             )
         )
+    except IdentityConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except IdentityValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except IdentityStoreError as exc:

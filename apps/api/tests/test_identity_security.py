@@ -23,6 +23,7 @@ from app.security.auth import (
 )
 from app.security.identity_store import (
     AuthUser,
+    IdentityAuthorizationError,
     IdentityConflictError,
     IdentityStoreError,
     IdentityValidationError,
@@ -127,8 +128,17 @@ class FakeIdentityStore:
         created_by_user_id: str,
     ) -> tuple[AuthUser, str]:
         self._check()
+        actor = self.get_user_by_id(created_by_user_id)
+        if actor is None or actor.status != "active" or actor.role not in {"platform_owner", "org_admin"}:
+            raise IdentityAuthorizationError("Actor is not authorized")
+        if actor.role == "org_admin":
+            if organization_id != actor.organization_id or role == "platform_owner":
+                raise IdentityAuthorizationError("Actor is not authorized")
         normalized = email.casefold().strip()
         existing = self.get_user_by_email(normalized)
+        if actor.role == "org_admin" and existing is not None:
+            if existing.organization_id != actor.organization_id or existing.role == "platform_owner":
+                raise IdentityAuthorizationError("Actor is not authorized")
         if existing and existing.status == "active":
             raise IdentityConflictError("User already active")
         if existing and existing.status == "disabled":
@@ -202,6 +212,13 @@ class FakeIdentityStore:
         new_role = role if role is not None else stored.user.role
         new_org = organization_id if organization_id is not None else stored.user.organization_id
         new_status = status if status is not None else stored.user.status
+        demoting = (
+            stored.user.role == "platform_owner"
+            and stored.user.status == "active"
+            and (new_role != "platform_owner" or new_status != "active")
+        )
+        if demoting and self.count_active_platform_owners(exclude_user_id=user_id) < 1:
+            raise IdentityConflictError("Cannot disable or demote the final active platform owner")
         bump = (
             new_role != stored.user.role
             or new_org != stored.user.organization_id

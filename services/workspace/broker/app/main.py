@@ -14,6 +14,13 @@ from docker.errors import ContainerError, DockerException, NotFound
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field, SecretStr
 
+from app.env_builders import (
+    bootstrap_helper_environment,
+    push_helper_environment,
+    quota_helper_environment,
+    runtime_container_environment,
+)
+
 RUNTIME_IMAGE = os.getenv("WORKSPACE_RUNTIME_IMAGE", "inzozi-code-workspace-runtime:local")
 QUOTA_HELPER_IMAGE = os.getenv("WORKSPACE_QUOTA_HELPER_IMAGE", "inzozi-code-workspace-quota-helper:local")
 QUOTA_STORAGE_ROOT = os.getenv("WORKSPACE_QUOTA_STORAGE_ROOT", "/srv/inzozi-code/workspace-data").rstrip("/")
@@ -279,14 +286,41 @@ def _is_expired(container) -> bool:
     return expires_at <= int(time.time())
 
 
+def _quota_helper_environment(*, workspace_id: str | None = None, limit_bytes: int | None = None) -> dict[str, str]:
+    resolved_id = _workspace_id(workspace_id) if workspace_id is not None else None
+    return quota_helper_environment(workspace_id=resolved_id, limit_bytes=limit_bytes)
+
+
+def _bootstrap_helper_environment(
+    *,
+    repository_url: str,
+    ref: str,
+    git_token: str,
+) -> dict[str, str]:
+    return bootstrap_helper_environment(
+        repository_url=repository_url,
+        ref=ref,
+        git_token=git_token,
+    )
+
+
+def _runtime_container_environment() -> dict[str, str]:
+    return runtime_container_environment(
+        max_file_bytes=MAX_FILE_BYTES,
+        max_output_bytes=MAX_OUTPUT_BYTES,
+        max_search_file_bytes=MAX_SEARCH_FILE_BYTES,
+        max_checkpoint_bytes=MAX_CHECKPOINT_BYTES,
+    )
+
+
+def _push_helper_environment(*, branch: str, expected_head: str, git_token: str) -> dict[str, str]:
+    return push_helper_environment(branch=branch, expected_head=expected_head, git_token=git_token)
+
+
 def _quota_helper_run(action: str, *, workspace_id: str | None = None, limit_bytes: int | None = None) -> dict:
     if action not in {"check", "setup", "destroy", "probe"}:
         raise RuntimeError("Unsupported quota helper action")
-    environment: dict[str, str] = {}
-    if workspace_id is not None:
-        environment["WORKSPACE_ID"] = _workspace_id(workspace_id)
-    if limit_bytes is not None:
-        environment["WORKSPACE_DISK_LIMIT_BYTES"] = str(limit_bytes)
+    environment = _quota_helper_environment(workspace_id=workspace_id, limit_bytes=limit_bytes)
 
     try:
         output = docker_client.containers.run(
@@ -525,13 +559,11 @@ def _create_workspace_sync(payload: CreateWorkspaceRequest) -> dict:
         _connect_manager_to(network)
         _helper_run(
             module="app.bootstrap",
-            environment={
-                "WORKSPACE_REPOSITORY_URL": payload.repository_url,
-                "WORKSPACE_REF": payload.ref or "",
-                "WORKSPACE_GIT_TOKEN": payload.git_token.get_secret_value() if payload.git_token else "",
-                "WORKSPACE_OWNER_UID": "10002",
-                "WORKSPACE_OWNER_GID": "10002",
-            },
+            environment=_bootstrap_helper_environment(
+                repository_url=payload.repository_url,
+                ref=payload.ref or "",
+                git_token=payload.git_token.get_secret_value() if payload.git_token else "",
+            ),
             volume_name=volume_name,
             network_name=EGRESS_NETWORK,
             root_bootstrap=True,
@@ -548,13 +580,7 @@ def _create_workspace_sync(payload: CreateWorkspaceRequest) -> dict:
             detach=True,
             network=network_name,
             volumes={volume_name: {"bind": f"/workspaces/{workspace_id}", "mode": "rw"}},
-            environment={
-                "WORKSPACE_ROOT": "/workspaces",
-                "WORKSPACE_MAX_FILE_BYTES": MAX_FILE_BYTES,
-                "WORKSPACE_MAX_OUTPUT_BYTES": MAX_OUTPUT_BYTES,
-                "WORKSPACE_MAX_SEARCH_FILE_BYTES": MAX_SEARCH_FILE_BYTES,
-                "WORKSPACE_MAX_CHECKPOINT_BYTES": MAX_CHECKPOINT_BYTES,
-            },
+            environment=_runtime_container_environment(),
             read_only=True,
             tmpfs={"/tmp": RUNTIME_TMPFS},
             cap_drop=["ALL"],
@@ -591,11 +617,11 @@ def _push_sync(workspace_id: str, request: PushRequest) -> dict:
         raise HTTPException(status_code=400, detail="Invalid reviewed commit")
     output = _helper_run(
         module="app.remote_push",
-        environment={
-            "WORKSPACE_BRANCH": request.branch,
-            "WORKSPACE_EXPECTED_HEAD": request.expected_head,
-            "WORKSPACE_GIT_TOKEN": request.git_token.get_secret_value(),
-        },
+        environment=_push_helper_environment(
+            branch=request.branch,
+            expected_head=request.expected_head,
+            git_token=request.git_token.get_secret_value(),
+        ),
         volume_name=_volume_name(workspace_id),
         network_name=EGRESS_NETWORK,
     )

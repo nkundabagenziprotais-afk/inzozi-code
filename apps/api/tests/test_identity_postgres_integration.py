@@ -261,3 +261,147 @@ def test_session_version_and_workspace_user_id_correlation():
         )
     legacy = list_accessible_active_workspaces(principal)
     assert {item.workspace_id for item in legacy} == {"a" * 32, "b" * 32}
+
+
+def test_org_admin_cannot_reissue_cross_org_or_platform_owner_pending():
+    from app.security.identity_store import IdentityAuthorizationError
+
+    owner = seed_platform_owner(
+        email="owner@inzozidigital.com",
+        password_hash=hash_password("a-secure-staging-password", salt=b"p" * 16),
+        organization_id="org-a",
+    )
+    # Create org A admin via owner invitation + activation.
+    _, admin_token = create_invitation(
+        email="admin-a@inzozidigital.com",
+        organization_id="org-a",
+        role="org_admin",
+        created_by_user_id=owner.user_id,
+    )
+    admin_a = activate_invitation(
+        token=admin_token,
+        password_hash=hash_password("admin-a-password", salt=b"a" * 16),
+    )
+
+    # Org B pending developer created by platform owner.
+    pending_b, _ = create_invitation(
+        email="pending-b@inzozidigital.com",
+        organization_id="org-b",
+        role="developer",
+        created_by_user_id=owner.user_id,
+    )
+    assert pending_b.organization_id == "org-b"
+
+    with pytest.raises(IdentityAuthorizationError):
+        create_invitation(
+            email="pending-b@inzozidigital.com",
+            organization_id="org-a",
+            role="developer",
+            created_by_user_id=admin_a.user_id,
+        )
+    with pytest.raises(IdentityAuthorizationError):
+        create_invitation(
+            email="pending-b@inzozidigital.com",
+            organization_id="org-b",
+            role="developer",
+            created_by_user_id=admin_a.user_id,
+        )
+
+    # Pending platform_owner cannot be reissued/demoted by org_admin.
+    pending_owner, _ = create_invitation(
+        email="pending-owner@inzozidigital.com",
+        organization_id="org-a",
+        role="platform_owner",
+        created_by_user_id=owner.user_id,
+    )
+    with pytest.raises(IdentityAuthorizationError):
+        create_invitation(
+            email="pending-owner@inzozidigital.com",
+            organization_id="org-a",
+            role="developer",
+            created_by_user_id=admin_a.user_id,
+        )
+    with pytest.raises(IdentityAuthorizationError):
+        create_invitation(
+            email="pending-owner@inzozidigital.com",
+            organization_id="org-a",
+            role="platform_owner",
+            created_by_user_id=admin_a.user_id,
+        )
+
+    # Same-org pending developer reissue by org_admin succeeds.
+    pending_dev, first_token = create_invitation(
+        email="pending-dev@inzozidigital.com",
+        organization_id="org-a",
+        role="developer",
+        created_by_user_id=admin_a.user_id,
+    )
+    reissued, second_token = create_invitation(
+        email="pending-dev@inzozidigital.com",
+        organization_id="org-a",
+        role="developer",
+        created_by_user_id=admin_a.user_id,
+    )
+    assert reissued.user_id == pending_dev.user_id
+    assert first_token != second_token
+
+    # Platform owner authorized reissue across orgs succeeds.
+    reissued_b, _ = create_invitation(
+        email="pending-b@inzozidigital.com",
+        organization_id="org-b",
+        role="developer",
+        created_by_user_id=owner.user_id,
+    )
+    assert reissued_b.user_id == pending_b.user_id
+    assert reissued_b.organization_id == "org-b"
+    assert pending_owner.role == "platform_owner"
+
+
+def test_concurrent_platform_owner_demotion_leaves_one_active():
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from app.security.identity_store import IdentityConflictError
+
+    owner_hash = hash_password("a-secure-staging-password", salt=b"p" * 16)
+    first = seed_platform_owner(
+        email="owner1@inzozidigital.com",
+        password_hash=owner_hash,
+        organization_id="inzozi-digital",
+    )
+    # Seed second owner via direct insert through invitation activation.
+    _, token = create_invitation(
+        email="owner2@inzozidigital.com",
+        organization_id="inzozi-digital",
+        role="platform_owner",
+        created_by_user_id=first.user_id,
+    )
+    second = activate_invitation(
+        token=token,
+        password_hash=hash_password("second-owner-password", salt=b"s" * 16),
+    )
+
+    results: list[str] = []
+
+    def demote(user_id: str) -> str:
+        try:
+            update_user(user_id=user_id, role="org_admin")
+            return "ok"
+        except IdentityConflictError:
+            return "conflict"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(demote, first.user_id),
+            pool.submit(demote, second.user_id),
+        ]
+        for future in as_completed(futures):
+            results.append(future.result())
+
+    assert results.count("ok") == 1
+    assert results.count("conflict") == 1
+    remaining = 0
+    with psycopg.connect(DATABASE_URL, row_factory=dict_row) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT COUNT(*) AS count FROM auth_users WHERE role = 'platform_owner' AND status = 'active'"
+        )
+        remaining = int(cursor.fetchone()["count"])
+    assert remaining >= 1

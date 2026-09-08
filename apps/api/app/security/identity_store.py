@@ -41,6 +41,14 @@ class IdentityValidationError(IdentityStoreError):
     """Caller supplied an invalid identity mutation."""
 
 
+class IdentityAuthorizationError(IdentityStoreError):
+    """Caller is not authorized to perform the requested identity mutation."""
+
+
+# Serialize platform-owner role/status mutations across concurrent connections.
+PLATFORM_OWNER_ADVISORY_LOCK_KEY = 0x494E5A5F504F5F4C  # "INZ_PO_L"
+
+
 @dataclass(frozen=True)
 class AuthUser:
     user_id: str
@@ -285,6 +293,34 @@ def seed_platform_owner(
     return _row_to_user(row)
 
 
+def _assert_invitation_actor_authorized(
+    *,
+    actor: dict[str, Any],
+    requested_organization_id: str,
+    requested_role: str,
+    existing: dict[str, Any] | None,
+) -> None:
+    if actor.get("status") != "active":
+        raise IdentityAuthorizationError("Actor is not authorized")
+    actor_role = str(actor.get("role") or "")
+    if actor_role not in {"platform_owner", "org_admin"}:
+        raise IdentityAuthorizationError("Actor is not authorized")
+
+    if actor_role == "platform_owner":
+        return
+
+    actor_org = str(actor.get("organization_id") or "")
+    if requested_organization_id != actor_org:
+        raise IdentityAuthorizationError("Actor is not authorized")
+    if requested_role == "platform_owner":
+        raise IdentityAuthorizationError("Actor is not authorized")
+    if existing is not None:
+        if str(existing.get("organization_id") or "") != actor_org:
+            raise IdentityAuthorizationError("Actor is not authorized")
+        if str(existing.get("role") or "") == "platform_owner":
+            raise IdentityAuthorizationError("Actor is not authorized")
+
+
 def create_invitation(
     *,
     email: str,
@@ -303,10 +339,35 @@ def create_invitation(
         with _connect(autocommit=False) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT user_id, status FROM auth_users WHERE email = %s FOR UPDATE",
+                    """
+                    SELECT user_id, email, organization_id, role, status
+                    FROM auth_users
+                    WHERE user_id = %s
+                    FOR UPDATE
+                    """,
+                    (created_by_user_id,),
+                )
+                actor = cursor.fetchone()
+                if actor is None:
+                    raise IdentityAuthorizationError("Actor is not authorized")
+
+                cursor.execute(
+                    """
+                    SELECT user_id, email, organization_id, role, status
+                    FROM auth_users
+                    WHERE email = %s
+                    FOR UPDATE
+                    """,
                     (normalized,),
                 )
                 existing = cursor.fetchone()
+                _assert_invitation_actor_authorized(
+                    actor=actor,
+                    requested_organization_id=organization_id,
+                    requested_role=role,
+                    existing=existing,
+                )
+
                 if existing and existing["status"] == "active":
                     raise IdentityConflictError("User already active")
                 if existing and existing["status"] == "disabled":
@@ -362,7 +423,7 @@ def create_invitation(
                 )
                 row = cursor.fetchone()
             connection.commit()
-    except (IdentityConflictError, IdentityValidationError):
+    except (IdentityConflictError, IdentityValidationError, IdentityAuthorizationError):
         raise
     except IdentityStoreError:
         raise
@@ -371,7 +432,6 @@ def create_invitation(
 
     assert row is not None
     return _row_to_user(row), token
-
 
 def activate_invitation(*, token: str, password_hash: str) -> AuthUser:
     digest = invitation_token_digest(token)
@@ -455,48 +515,87 @@ def update_user(
 ) -> AuthUser:
     if status is not None and status not in USER_STATUSES:
         raise IdentityValidationError("Invalid user status")
-    existing = get_user_by_id(user_id)
-    if existing is None:
-        raise IdentityValidationError("User not found")
-
-    new_role = role if role is not None else existing.role
-    new_org = organization_id if organization_id is not None else existing.organization_id
-    new_status = status if status is not None else existing.status
-    bump_session = (
-        new_role != existing.role
-        or new_org != existing.organization_id
-        or (new_status == "disabled" and existing.status != "disabled")
-    )
 
     try:
-        with _connect() as connection, connection.cursor() as cursor:
-            cursor.execute(
-                """
-                UPDATE auth_users
-                SET role = %s,
-                    organization_id = %s,
-                    status = %s,
-                    session_version = CASE WHEN %s THEN session_version + 1 ELSE session_version END,
-                    updated_at = NOW(),
-                    disabled_at = CASE
-                        WHEN %s = 'disabled' AND status <> 'disabled' THEN NOW()
-                        WHEN %s <> 'disabled' THEN NULL
-                        ELSE disabled_at
-                    END
-                WHERE user_id = %s
-                RETURNING user_id, email, organization_id, role, status, session_version,
-                          created_by_user_id, created_at, updated_at, activated_at, disabled_at
-                """,
-                (new_role, new_org, new_status, bump_session, new_status, new_status, user_id),
-            )
-            row = cursor.fetchone()
+        with _connect(autocommit=False) as connection:
+            with connection.cursor() as cursor:
+                # Serialize owner-role/status mutations so concurrent demotions cannot
+                # race past a route-level "final owner" pre-check.
+                cursor.execute("SELECT pg_advisory_xact_lock(%s)", (PLATFORM_OWNER_ADVISORY_LOCK_KEY,))
+                cursor.execute(
+                    """
+                    SELECT user_id, email, organization_id, role, status, session_version,
+                           created_by_user_id, created_at, updated_at, activated_at, disabled_at
+                    FROM auth_users
+                    WHERE user_id = %s
+                    FOR UPDATE
+                    """,
+                    (user_id,),
+                )
+                existing = cursor.fetchone()
+                if existing is None:
+                    raise IdentityValidationError("User not found")
+
+                new_role = role if role is not None else str(existing["role"])
+                new_org = organization_id if organization_id is not None else str(existing["organization_id"])
+                new_status = status if status is not None else str(existing["status"])
+                bump_session = (
+                    new_role != str(existing["role"])
+                    or new_org != str(existing["organization_id"])
+                    or (new_status == "disabled" and str(existing["status"]) != "disabled")
+                )
+
+                demoting_or_disabling_owner = (
+                    str(existing["role"]) == "platform_owner"
+                    and str(existing["status"]) == "active"
+                    and (new_role != "platform_owner" or new_status != "active")
+                )
+                if demoting_or_disabling_owner:
+                    cursor.execute(
+                        """
+                        SELECT user_id
+                        FROM auth_users
+                        WHERE role = 'platform_owner'
+                          AND status = 'active'
+                        FOR UPDATE
+                        """
+                    )
+                    active_owners = {str(row["user_id"]) for row in cursor.fetchall()}
+                    remaining = active_owners - {str(existing["user_id"])}
+                    if not remaining:
+                        raise IdentityConflictError(
+                            "Cannot disable or demote the final active platform owner"
+                        )
+
+                cursor.execute(
+                    """
+                    UPDATE auth_users
+                    SET role = %s,
+                        organization_id = %s,
+                        status = %s,
+                        session_version = CASE WHEN %s THEN session_version + 1 ELSE session_version END,
+                        updated_at = NOW(),
+                        disabled_at = CASE
+                            WHEN %s = 'disabled' AND status <> 'disabled' THEN NOW()
+                            WHEN %s <> 'disabled' THEN NULL
+                            ELSE disabled_at
+                        END
+                    WHERE user_id = %s
+                    RETURNING user_id, email, organization_id, role, status, session_version,
+                              created_by_user_id, created_at, updated_at, activated_at, disabled_at
+                    """,
+                    (new_role, new_org, new_status, bump_session, new_status, new_status, user_id),
+                )
+                row = cursor.fetchone()
+            connection.commit()
+    except (IdentityConflictError, IdentityValidationError, IdentityAuthorizationError):
+        raise
     except IdentityStoreError:
         raise
     except Exception as exc:  # noqa: BLE001
         raise IdentityStoreError("Identity store unavailable") from exc
     assert row is not None
     return _row_to_user(row)
-
 
 def revoke_all_sessions(user_id: str) -> AuthUser:
     existing = get_user_by_id(user_id)

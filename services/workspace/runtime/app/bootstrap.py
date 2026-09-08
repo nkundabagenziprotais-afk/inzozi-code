@@ -8,7 +8,7 @@ import re
 import subprocess
 import sys
 
-from app.git_credentials import github_git_environment
+from app.git_credentials import _base_process_environment, github_git_environment
 
 GITHUB_HTTPS_RE = re.compile(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$")
 REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,159}$")
@@ -76,10 +76,10 @@ def main() -> int:
         return 2
 
     ROOT.mkdir(parents=True, exist_ok=True)
-    env = os.environ.copy()
-    env.update({"GIT_TERMINAL_PROMPT": "0", "HOME": "/tmp"})
     if token:
         env = github_git_environment(token)
+    else:
+        env = _base_process_environment()
 
     command = ["git", "-c", "credential.helper=", "clone", "--depth", "1", "--no-tags"]
     if ref:
