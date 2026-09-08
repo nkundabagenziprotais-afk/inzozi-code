@@ -5,6 +5,12 @@ APP_ROOT="${APP_ROOT:-/srv/inzozi-code/application}"
 ENV_FILE="${ENV_FILE:-/srv/inzozi-code/.env.staging}"
 API_URL="${API_URL:-http://127.0.0.1:8000}"
 STAGING_COMPOSE="${APP_ROOT}/infrastructure/staging/docker-compose.staging.yml"
+REQUIRE_SECURE_COOKIE="${REQUIRE_SECURE_COOKIE:-false}"
+
+if [[ "${REQUIRE_SECURE_COOKIE}" != "true" && "${REQUIRE_SECURE_COOKIE}" != "false" ]]; then
+  echo "REQUIRE_SECURE_COOKIE must be true or false." >&2
+  exit 1
+fi
 
 if [[ ! -d "${APP_ROOT}/.git" ]]; then
   echo "Expected a Git checkout at ${APP_ROOT}." >&2
@@ -70,6 +76,10 @@ if [[ "${auth_cookie_secure}" != "true" && "${auth_cookie_secure}" != "false" ]]
   echo "AUTH_COOKIE_SECURE must be true or false." >&2
   exit 1
 fi
+if [[ "${REQUIRE_SECURE_COOKIE}" == "true" && "${auth_cookie_secure}" != "true" ]]; then
+  echo "AUTH_COOKIE_SECURE must be true when REQUIRE_SECURE_COOKIE=true." >&2
+  exit 1
+fi
 
 host_hash_fingerprint="$(printf '%s' "${auth_hash}" | sha256sum | awk '{print $1}')"
 unset auth_hash
@@ -78,8 +88,9 @@ cd "${APP_ROOT}"
 COMPOSE=(docker compose --env-file "${ENV_FILE}" -f docker-compose.yml -f "${STAGING_COMPOSE}")
 "${COMPOSE[@]}" config --quiet
 
-container_hash_fingerprint="$("${COMPOSE[@]}" exec -T api python - <<'PY'
+container_hash_fingerprint="$("${COMPOSE[@]}" exec -T -e EXPECTED_COOKIE_SECURE="${auth_cookie_secure}" api python - <<'PY'
 import hashlib
+import os
 
 from app.core.config import get_settings
 from app.security.auth import ROLE_PERMISSIONS
@@ -95,6 +106,9 @@ if len(settings.auth_session_secret) < 32:
     raise SystemExit("API container session secret is too short")
 if settings.auth_bootstrap_role not in ROLE_PERMISSIONS:
     raise SystemExit("API container bootstrap role is invalid")
+expected_cookie_secure = os.environ.get("EXPECTED_COOKIE_SECURE") == "true"
+if settings.auth_cookie_secure is not expected_cookie_secure:
+    raise SystemExit("API container AUTH_COOKIE_SECURE does not match the host environment")
 print(hashlib.sha256(settings.auth_password_hash.encode("utf-8")).hexdigest())
 PY
 )"

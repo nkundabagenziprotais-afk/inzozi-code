@@ -24,6 +24,7 @@ apt-get install -y \
   curl \
   git \
   nginx \
+  openssl \
   certbot \
   python3-certbot-nginx \
   docker.io \
@@ -50,10 +51,16 @@ Security note:
 Next:
 1. Put the reviewed Git checkout in /srv/inzozi-code/application.
 2. Create /srv/inzozi-code/.env.staging with chmod 600.
-3. Configure host Nginx from infrastructure/staging/host-nginx.conf.template.
-4. Point code-staging.inzozidigital.com to this host.
-5. Request TLS only after DNS resolves to this server.
-6. Run infrastructure/staging/deploy-staging.sh.
+3. Keep HTTP and HTTPS firewall CIDRs restricted to the approved operator network.
+4. Activate the private HTTP vhost with:
+   sudo MODE=http APP_ROOT=/srv/inzozi-code/application \
+     /srv/inzozi-code/application/infrastructure/staging/configure-host-nginx.sh
+5. Generate private staging TLS without public DNS:
+   sudo /srv/inzozi-code/application/infrastructure/staging/prepare-private-tls.sh
+6. Set AUTH_COOKIE_SECURE=true and recreate the API.
+7. Activate HTTPS with MODE=https, then run infrastructure/staging/https-preflight.sh.
+8. Keep public DNS disabled.
+9. Run infrastructure/staging/deploy-staging.sh.
 EOF
 
 docker --version

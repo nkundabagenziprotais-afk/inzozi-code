@@ -595,3 +595,29 @@ def test_api_dockerfile_disables_uvicorn_proxy_header_rewriting():
     assert "--no-proxy-headers" in text
     assert "CMD" in text
     assert "uvicorn" in text
+
+
+def test_login_marks_session_cookie_secure_when_enabled(monkeypatch):
+    _configure_auth(monkeypatch)
+    monkeypatch.setenv("AUTH_COOKIE_SECURE", "true")
+    get_settings.cache_clear()
+
+    with TestClient(_test_app()) as client:
+        response = client.post(
+            "/v1/auth/login",
+            json={
+                "email": "owner@inzozidigital.com",
+                "password": "a-secure-staging-password",
+            },
+        )
+
+        assert response.status_code == 200
+
+        set_cookie = response.headers.get("set-cookie", "")
+
+        assert "HttpOnly" in set_cookie
+        assert "SameSite=strict" in set_cookie
+        assert "Secure" in set_cookie
+
+    get_settings.cache_clear()
+    configure_auth_state_client(None)
