@@ -13,6 +13,8 @@ from fastapi.responses import Response
 import httpx
 from pydantic import BaseModel, Field, SecretStr
 
+from app.broker_payloads import build_broker_create_workspace_payload, build_broker_push_payload
+
 BROKER_URL = os.getenv("WORKSPACE_BROKER_URL", "http://workspace-broker:8300").rstrip("/")
 BROKER_TOKEN = os.getenv("WORKSPACE_BROKER_TOKEN", "")
 API_SERVICE_HOST = os.getenv("WORKSPACE_API_SERVICE_HOST", "api")
@@ -191,13 +193,13 @@ async def create_workspace(payload: CreateWorkspaceRequest, request: Request) ->
 
     workspace_id = uuid.uuid4().hex
     expires_at = int(time.time()) + TTL_SECONDS
-    broker_payload = {
-        "workspace_id": workspace_id,
-        "repository_url": payload.repository_url,
-        "ref": payload.ref,
-        "git_token": payload.git_token.get_secret_value() if payload.git_token else None,
-        "expires_at": expires_at,
-    }
+    broker_payload = build_broker_create_workspace_payload(
+        workspace_id=workspace_id,
+        repository_url=payload.repository_url,
+        ref=payload.ref,
+        git_token=payload.git_token.get_secret_value() if payload.git_token else None,
+        expires_at=expires_at,
+    )
     broker_result = await _broker_request("POST", "/v1/workspaces", json=broker_payload) or {}
     await _wait_for_runtime(workspace_id)
     return {
@@ -226,11 +228,11 @@ async def git_push(workspace_id: str, payload: PushRequest, request: Request) ->
     result = await _broker_request(
         "POST",
         f"/v1/workspaces/{workspace_id}/git/push",
-        json={
-            "branch": payload.branch,
-            "expected_head": payload.expected_head,
-            "git_token": payload.git_token.get_secret_value(),
-        },
+        json=build_broker_push_payload(
+            branch=payload.branch,
+            expected_head=payload.expected_head,
+            git_token=payload.git_token.get_secret_value(),
+        ),
     )
     return result or {}
 

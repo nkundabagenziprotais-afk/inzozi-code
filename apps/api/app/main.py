@@ -12,6 +12,7 @@ from app.routes.github_app import router as github_app_router
 from app.routes.health import router as health_router
 from app.routes.workspace import router as workspace_router
 from app.security.auth import AuthMiddleware
+from app.security.identity_store import ensure_identity_schema
 from app.security.redis_controls import (
     AuthStateUnavailableError,
     close_auth_state_store,
@@ -31,6 +32,9 @@ async def lifespan(_: FastAPI):
                 await init_auth_state_store()
             except AuthStateUnavailableError as exc:
                 raise RuntimeError("Authentication state service unavailable") from exc
+            if settings.auth_identity_mode == "database":
+                # Fail closed when durable identity schema cannot initialize.
+                ensure_identity_schema()
         if settings.workspace_ownership_enforced:
             # Fail closed in staging if durable ownership cannot be initialized.
             ensure_workspace_ownership_schema()

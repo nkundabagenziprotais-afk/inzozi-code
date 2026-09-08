@@ -69,6 +69,7 @@ jobs:
           bash -n infrastructure/staging/deploy-staging.sh
           bash -n infrastructure/staging/github-app-preflight.sh
           bash -n infrastructure/staging/auth-preflight.sh
+          bash -n infrastructure/staging/seed-database-identity.sh
           bash -n infrastructure/staging/workspace-ownership-preflight.sh
           bash -n infrastructure/staging/dedicated-workspace-preflight.sh
           bash -n infrastructure/hetzner/prepare-local.sh
@@ -245,6 +246,7 @@ jobs:
               "limit_req_status 429;",
               "limit_conn_status 429;",
               "location = /api/v1/auth/login",
+              "location = /api/v1/auth/activate",
               "location = /api/v1/agent/run",
               'location ~ "^/api/v1/workspaces/[0-9a-f]{32}/actions$"',
               "client_max_body_size 16k;",
@@ -405,6 +407,19 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: inzozi_code
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: inzozi_code
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U inzozi_code -d inzozi_code"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -418,6 +433,18 @@ jobs:
         run: |
           python -m pip install -e '.[dev]'
           pytest -q tests/test_auth_redis_integration.py
+      - name: Test durable PostgreSQL identity controls
+        working-directory: apps/api
+        env:
+          RUN_POSTGRES_INTEGRATION: "1"
+          DATABASE_URL: postgresql://inzozi_code:test-only@127.0.0.1:5432/inzozi_code
+          AUTH_ENABLED: "true"
+          AUTH_IDENTITY_MODE: database
+          AUTH_SESSION_SECRET: ci-only-session-secret-00000000000000000000000000000000
+          REDIS_URL: redis://127.0.0.1:6379/14
+        run: |
+          python -m pip install -e '.[dev]'
+          pytest -q tests/test_identity_postgres_integration.py
 
   web-build:
     runs-on: ubuntu-latest
