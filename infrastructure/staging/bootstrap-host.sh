@@ -52,15 +52,28 @@ Next:
 1. Put the reviewed Git checkout in /srv/inzozi-code/application.
 2. Create /srv/inzozi-code/.env.staging with chmod 600.
 3. Keep HTTP and HTTPS firewall CIDRs restricted to the approved operator network.
-4. Activate the private HTTP vhost with:
-   sudo MODE=http APP_ROOT=/srv/inzozi-code/application \
+4. Set AUTH_COOKIE_SECURE=true in the mode-600 staging environment.
+5. Export the exact reviewed 40-character commit as EXPECTED_COMMIT_SHA.
+6. Deploy the exact reviewed checkout first:
+   EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA}" \
+     /srv/inzozi-code/application/infrastructure/staging/deploy-staging.sh
+7. Confirm the running API loaded the secure-cookie setting:
+   REQUIRE_SECURE_COOKIE=true \
+     /srv/inzozi-code/application/infrastructure/staging/auth-preflight.sh
+8. Activate the private HTTP vhost with:
+   sudo EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA}" MODE=http \
+     APP_ROOT=/srv/inzozi-code/application \
      /srv/inzozi-code/application/infrastructure/staging/configure-host-nginx.sh
-5. Generate private staging TLS without public DNS:
+9. Generate private staging TLS without public DNS:
    sudo /srv/inzozi-code/application/infrastructure/staging/prepare-private-tls.sh
-6. Set AUTH_COOKIE_SECURE=true and recreate the API.
-7. Activate HTTPS with MODE=https, then run infrastructure/staging/https-preflight.sh.
-8. Keep public DNS disabled.
-9. Run infrastructure/staging/deploy-staging.sh.
+10. Activate HTTPS with:
+    sudo EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA}" MODE=https \
+      APP_ROOT=/srv/inzozi-code/application \
+      /srv/inzozi-code/application/infrastructure/staging/configure-host-nginx.sh
+11. Run the final HTTPS preflight only after deployment:
+    EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA}" \
+      /srv/inzozi-code/application/infrastructure/staging/https-preflight.sh
+12. Keep public DNS disabled.
 EOF
 
 docker --version

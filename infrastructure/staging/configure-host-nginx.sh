@@ -4,6 +4,7 @@ set -euo pipefail
 APP_ROOT="${APP_ROOT:-/srv/inzozi-code/application}"
 ENV_FILE="${ENV_FILE:-/srv/inzozi-code/.env.staging}"
 MODE="${MODE:-http}"
+EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA:-}"
 
 DOMAIN="code-staging.inzozidigital.com"
 SITE_NAME="inzozi-code-staging"
@@ -40,6 +41,19 @@ esac
 
 [[ -d "${APP_ROOT}/.git" ]] ||
   fail "expected reviewed application checkout at ${APP_ROOT}"
+
+[[ "${EXPECTED_COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]] ||
+  fail "EXPECTED_COMMIT_SHA must be the exact reviewed 40-character commit SHA"
+
+[[ -z "$(git -C "${APP_ROOT}" status --porcelain)" ]] ||
+  fail "reviewed application checkout must be clean"
+
+CURRENT_COMMIT_SHA="$(
+  git -C "${APP_ROOT}" rev-parse HEAD
+)"
+
+[[ "${CURRENT_COMMIT_SHA}" == "${EXPECTED_COMMIT_SHA}" ]] ||
+  fail "application checkout does not match EXPECTED_COMMIT_SHA"
 
 [[ -f "${ENV_FILE}" ]] ||
   fail "missing staging environment file: ${ENV_FILE}"
@@ -183,16 +197,15 @@ install -m 0644 "${TEMPLATE}" "${CANDIDATE}"
 install -m 0644 "${CANDIDATE}" "${AVAILABLE}"
 ln -sfn "${AVAILABLE}" "${ENABLED}"
 
-if ! nginx -t; then
-  rollback
-  fail "candidate configuration did not pass nginx -t"
-fi
-
+# Ubuntu's stock site is itself a port-80 default_server. Remove its
+# enabled symlink before validating our candidate so two default servers
+# are never tested together. The running Nginx configuration is unchanged
+# until reload, and rollback restores the previous symlink exactly.
 rm -f "${DEFAULT_ENABLED}"
 
 if ! nginx -t; then
   rollback
-  fail "configuration failed after default-site removal"
+  fail "candidate configuration failed after controlled default-site removal"
 fi
 
 if ! systemctl reload nginx; then
@@ -294,6 +307,7 @@ cleanup_files
 trap - EXIT
 
 echo "HOST_NGINX_CONFIGURATION_MODE=${MODE}"
+echo "reviewed_commit=${CURRENT_COMMIT_SHA}"
 echo "DEFAULT_VHOST_REJECTS_UNKNOWN_HOSTS=PASS"
 echo "HOST_NGINX_FUNCTIONAL_CHECK=PASS"
 echo "NO_DNS_CHANGE"

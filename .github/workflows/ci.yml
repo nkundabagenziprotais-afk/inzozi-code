@@ -119,6 +119,67 @@ jobs:
           print("TLS_PROTOCOL_POLICY=PASS")
           PY
 
+          python3 - <<'PY'
+          from pathlib import Path
+
+          installer = Path(
+              "infrastructure/staging/configure-host-nginx.sh"
+          ).read_text()
+
+          activation = installer.index(
+              'install -m 0644 "${TEMPLATE}" "${CANDIDATE}"'
+          )
+
+          activation_tail = installer[activation:]
+
+          remove_default = activation_tail.index(
+              'rm -f "${DEFAULT_ENABLED}"'
+          )
+
+          first_active_nginx_test = activation_tail.index(
+              'if ! nginx -t; then'
+          )
+
+          if remove_default > first_active_nginx_test:
+              raise SystemExit(
+                  "Ubuntu default site must be removed before candidate nginx -t"
+              )
+
+          for reviewed_path in (
+              "infrastructure/staging/configure-host-nginx.sh",
+              "infrastructure/staging/deploy-staging.sh",
+              "infrastructure/staging/https-preflight.sh",
+          ):
+              reviewed_text = Path(reviewed_path).read_text()
+
+              if "EXPECTED_COMMIT_SHA" not in reviewed_text:
+                  raise SystemExit(
+                      f"Missing reviewed-SHA boundary: {reviewed_path}"
+                  )
+
+          variables = Path(
+              "infrastructure/hetzner/variables.tf"
+          ).read_text()
+
+          if variables.count(
+              'cidr != "0.0.0.0/0"'
+          ) < 3:
+              raise SystemExit(
+                  "IPv4 internet-wide CIDR rejection is incomplete"
+              )
+
+          if variables.count(
+              'cidr != "::/0"'
+          ) < 3:
+              raise SystemExit(
+                  "IPv6 internet-wide CIDR rejection is incomplete"
+              )
+
+          print("HOST_NGINX_ACTIVATION_ORDER=PASS")
+          print("REVIEWED_SHA_BOUNDARIES=PASS")
+          print("PRIVATE_WEB_CIDR_REJECTION=PASS")
+          PY
+
           TMP_TLS="$(mktemp -d)"
           trap 'rm -rf "${TMP_TLS}"' EXIT
 

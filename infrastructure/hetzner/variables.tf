@@ -78,6 +78,14 @@ variable "http_source_cidrs" {
     )
     error_message = "http_source_cidrs must contain at least one explicitly supplied valid CIDR."
   }
+
+  validation {
+    condition = alltrue([
+      for cidr in var.http_source_cidrs :
+      cidr != "0.0.0.0/0" && cidr != "::/0"
+    ])
+    error_message = "Private staging HTTP may not be opened to the entire internet."
+  }
 }
 
 variable "https_source_cidrs" {
@@ -93,6 +101,14 @@ variable "https_source_cidrs" {
       ])
     )
     error_message = "https_source_cidrs must contain at least one explicitly supplied valid CIDR."
+  }
+
+  validation {
+    condition = alltrue([
+      for cidr in var.https_source_cidrs :
+      cidr != "0.0.0.0/0" && cidr != "::/0"
+    ])
+    error_message = "Private staging HTTPS may not be opened to the entire internet."
   }
 }
 

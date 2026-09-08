@@ -4,6 +4,7 @@ set -euo pipefail
 APP_ROOT="${APP_ROOT:-/srv/inzozi-code/application}"
 ENV_FILE="${ENV_FILE:-/srv/inzozi-code/.env.staging}"
 DOMAIN="${DOMAIN:-code-staging.inzozidigital.com}"
+EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA:-}"
 
 TLS_DIR="/etc/inzozi-code/tls/${DOMAIN}"
 CA_CERT="${TLS_DIR}/ca.pem"
@@ -17,6 +18,19 @@ fail() {
 
 [[ -d "${APP_ROOT}/.git" ]] ||
   fail "expected reviewed checkout at ${APP_ROOT}"
+
+[[ "${EXPECTED_COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]] ||
+  fail "EXPECTED_COMMIT_SHA must be the exact reviewed 40-character commit SHA"
+
+[[ -z "$(git -C "${APP_ROOT}" status --porcelain)" ]] ||
+  fail "reviewed application checkout must be clean"
+
+CURRENT_COMMIT_SHA="$(
+  git -C "${APP_ROOT}" rev-parse HEAD
+)"
+
+[[ "${CURRENT_COMMIT_SHA}" == "${EXPECTED_COMMIT_SHA}" ]] ||
+  fail "application checkout does not match EXPECTED_COMMIT_SHA"
 
 [[ -f "${ENV_FILE}" ]] ||
   fail "missing staging environment file"
@@ -156,6 +170,7 @@ ENV_FILE="${ENV_FILE}" \
 REQUIRE_SECURE_COOKIE=true \
 bash "${APP_ROOT}/infrastructure/staging/auth-preflight.sh"
 
+echo "reviewed_commit=${CURRENT_COMMIT_SHA}"
 echo "PRIVATE_CA_CERTIFICATE_VALID=PASS"
 echo "HTTPS_LISTENER=PASS"
 echo "UNKNOWN_HOST_REJECTION=PASS"

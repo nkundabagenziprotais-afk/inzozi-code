@@ -5,6 +5,7 @@ APP_ROOT="${APP_ROOT:-/srv/inzozi-code/application}"
 ENV_FILE="${ENV_FILE:-/srv/inzozi-code/.env.staging}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/health}"
 STAGING_COMPOSE="${APP_ROOT}/infrastructure/staging/docker-compose.staging.yml"
+EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA:-}"
 
 if [[ ! -d "${APP_ROOT}/.git" ]]; then
   echo "Expected a Git checkout at ${APP_ROOT}." >&2
@@ -26,6 +27,11 @@ if [[ ! -f "${STAGING_COMPOSE}" ]]; then
   exit 1
 fi
 
+if [[ ! "${EXPECTED_COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Refusing deployment: EXPECTED_COMMIT_SHA must be the exact reviewed 40-character SHA." >&2
+  exit 1
+fi
+
 cd "${APP_ROOT}"
 
 if [[ -n "$(git status --porcelain)" ]]; then
@@ -35,6 +41,12 @@ if [[ -n "$(git status --porcelain)" ]]; then
 fi
 
 COMMIT_SHA="$(git rev-parse HEAD)"
+
+if [[ "${COMMIT_SHA}" != "${EXPECTED_COMMIT_SHA}" ]]; then
+  echo "Refusing deployment: checkout ${COMMIT_SHA} does not match reviewed ${EXPECTED_COMMIT_SHA}." >&2
+  exit 1
+fi
+
 BRANCH_NAME="$(git branch --show-current || true)"
 COMPOSE=(docker compose --env-file "${ENV_FILE}" -f docker-compose.yml -f "${STAGING_COMPOSE}")
 
@@ -76,3 +88,4 @@ fi
 echo "Health check passed: ${HEALTH_URL}"
 "${COMPOSE[@]}" ps
 printf 'deployed_commit=%s\n' "${COMMIT_SHA}"
+printf 'expected_commit=%s\n' "${EXPECTED_COMMIT_SHA}"

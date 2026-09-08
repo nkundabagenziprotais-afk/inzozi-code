@@ -137,14 +137,16 @@ After the host and quota storage are verified:
 2. Create `/srv/inzozi-code/.env.staging` on the server with mode `600`.
 3. Mount the GitHub App PEM into the API container through the staging Compose override; never commit it.
 4. Keep both HTTP and HTTPS firewall CIDRs restricted to the approved operator network.
-5. Activate the reviewed private HTTP vhost with `sudo MODE=http infrastructure/staging/configure-host-nginx.sh`.
-6. Generate the short-lived private staging TLS identity with `sudo infrastructure/staging/prepare-private-tls.sh`; this requires no public DNS.
-7. Set `AUTH_COOKIE_SECURE=true` in the mode-600 staging environment, recreate the API, and run `REQUIRE_SECURE_COOKIE=true infrastructure/staging/auth-preflight.sh`.
-8. Activate private HTTPS with `sudo MODE=https infrastructure/staging/configure-host-nginx.sh`.
-9. Run `infrastructure/staging/https-preflight.sh`.
-10. Run `infrastructure/staging/deploy-staging.sh`.
-11. Run `infrastructure/staging/dedicated-workspace-preflight.sh`.
-12. Keep public DNS disabled; a publicly trusted certificate and public ingress remain a separate future release gate.
+5. Set `AUTH_COOKIE_SECURE=true` in the mode-600 staging environment before the reviewed HTTPS deployment.
+6. Export the exact reviewed 40-character SHA as `EXPECTED_COMMIT_SHA`.
+7. Deploy that exact checkout first with `EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA}" infrastructure/staging/deploy-staging.sh`; Docker Nginx remains bound to host loopback only.
+8. Run `REQUIRE_SECURE_COOKIE=true infrastructure/staging/auth-preflight.sh` and confirm the running API loaded the secure-cookie setting.
+9. Activate the reviewed private HTTP vhost with `sudo EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA}" MODE=http infrastructure/staging/configure-host-nginx.sh`.
+10. Generate the short-lived private staging TLS identity with `sudo infrastructure/staging/prepare-private-tls.sh`; this requires no public DNS.
+11. Activate private HTTPS with `sudo EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA}" MODE=https infrastructure/staging/configure-host-nginx.sh`.
+12. Run `EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA}" infrastructure/staging/https-preflight.sh` only after the reviewed Docker and host-Nginx configuration is live.
+13. Run `infrastructure/staging/dedicated-workspace-preflight.sh`.
+14. Keep public DNS disabled; a publicly trusted certificate and public ingress remain a separate future release gate.
 
 ## Destroy when review is complete
 
