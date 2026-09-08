@@ -68,6 +68,8 @@ def _principal(*, role: str = "developer", email: str = "developer@inzozidigital
         permissions=ROLE_PERMISSIONS[role],
         session_id="test-session",
         expires_at=None,
+        user_id="11111111-1111-4111-8111-111111111111",
+        session_version=0,
         auth_enabled=True,
     )
 
@@ -146,8 +148,14 @@ def test_list_accessible_active_workspaces_scopes_developer(monkeypatch):
     assert [item.workspace_id for item in result] == [OWN_ID]
     assert "deleted_at IS NULL" in cursor.query
     assert "organization_id = %s" in cursor.query
+    assert "owner_user_id = %s" in cursor.query
     assert "owner_email = %s" in cursor.query
-    assert cursor.params == ("inzozi-digital", "developer@inzozidigital.com", 20)
+    assert cursor.params == (
+        "inzozi-digital",
+        "11111111-1111-4111-8111-111111111111",
+        "developer@inzozidigital.com",
+        20,
+    )
 
 
 def test_list_accessible_active_workspaces_privileged_same_org_only(monkeypatch):
@@ -177,6 +185,7 @@ def test_principal_access_still_blocks_cross_org_and_deleted():
         organization_id="inzozi-digital",
         email="developer@inzozidigital.com",
         role="developer",
+        user_id="11111111-1111-4111-8111-111111111111",
     )
     assert principal_can_access(principal, _ownership(workspace_id=OWN_ID)) is True
     assert principal_can_access(principal, _ownership(workspace_id=OTHER_OWNER_ID, owner_email="other@inzozidigital.com")) is False

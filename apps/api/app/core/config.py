@@ -1,5 +1,9 @@
 from functools import lru_cache
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+IDENTITY_MODES = frozenset({"bootstrap", "database"})
 
 
 class Settings(BaseSettings):
@@ -20,6 +24,8 @@ class Settings(BaseSettings):
     github_app_private_key_path: str = ""
 
     auth_enabled: bool = False
+    # bootstrap = single env bootstrap identity; database = durable PostgreSQL users.
+    auth_identity_mode: str = "bootstrap"
     auth_bootstrap_email: str = ""
     auth_password_hash: str = ""
     auth_session_secret: str = ""
@@ -32,6 +38,14 @@ class Settings(BaseSettings):
     auth_trusted_proxies: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @field_validator("auth_identity_mode")
+    @classmethod
+    def _validate_identity_mode(cls, value: str) -> str:
+        normalized = (value or "").strip().casefold()
+        if normalized not in IDENTITY_MODES:
+            raise ValueError("AUTH_IDENTITY_MODE must be bootstrap or database")
+        return normalized
 
 
 @lru_cache

@@ -33,9 +33,17 @@ def login_identifier_digest(*, client_host: str, email: str) -> str:
     return hashlib.sha256(material).hexdigest()
 
 
-def session_claims_fingerprint(*, email: str, role: str, organization_id: str) -> str:
+def session_claims_fingerprint(
+    *,
+    email: str,
+    role: str,
+    organization_id: str,
+    user_id: str,
+    session_version: int,
+) -> str:
     material = (
-        f"{email.casefold().strip()}\0{role.strip()}\0{organization_id.strip()}".encode("utf-8")
+        f"{user_id.strip()}\0{email.casefold().strip()}\0{role.strip()}\0"
+        f"{organization_id.strip()}\0{int(session_version)}".encode("utf-8")
     )
     return hashlib.sha256(material).hexdigest()
 

@@ -96,6 +96,25 @@ server {
         proxy_read_timeout 300s;
     }
 
+    location = /api/v1/auth/activate {
+        limit_req zone=inzozi_login_per_ip burst=4 nodelay;
+        limit_conn inzozi_conn_per_ip 4;
+        client_max_body_size 16k;
+
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout 300s;
+    }
+
     location = /api/v1/agent/run {
         limit_req zone=inzozi_expensive_per_ip burst=5 nodelay;
         limit_conn inzozi_conn_per_ip 4;

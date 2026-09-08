@@ -10,6 +10,7 @@ from app.routes.auth import router as auth_router
 from app.routes.health import router as health_router
 from app.security.auth import (
     SESSION_COOKIE,
+    BOOTSTRAP_USER_ID,
     AuthenticationError,
     AuthMiddleware,
     ROLE_PERMISSIONS,
@@ -73,9 +74,17 @@ def test_password_hash_is_salted_and_verifiable():
 
 def test_session_signature_rejects_tampering(monkeypatch):
     _configure_auth(monkeypatch)
-    token, _ = create_session_token("owner@inzozidigital.com", "platform_owner", "inzozi-digital")
+    token, _ = create_session_token(
+        "owner@inzozidigital.com",
+        "platform_owner",
+        "inzozi-digital",
+        user_id=BOOTSTRAP_USER_ID,
+        session_version=0,
+    )
     principal = decode_session_token(token)
     assert principal.role == "platform_owner"
+    assert principal.user_id == BOOTSTRAP_USER_ID
+    assert principal.session_version == 0
     assert principal.has("git:push") is True
 
     payload, signature = token.split(".", 1)
@@ -92,6 +101,9 @@ def test_permission_mapping_keeps_git_gates_separate():
     assert permission_for_request("POST", "/v1/workspaces/" + "a" * 32 + "/git/push/prepare") == "git:push"
     assert permission_for_request("POST", "/v1/workspaces/" + "a" * 32 + "/git/pull-request/prepare") == "git:pull_request"
     assert permission_for_request("PUT", "/v1/workspaces/" + "a" * 32 + "/files/README.md") == "workspace:edit"
+    assert permission_for_request("GET", "/v1/auth/users") == "rbac:admin"
+    assert permission_for_request("POST", "/v1/auth/users/invitations") == "rbac:admin"
+    assert permission_for_request("POST", "/v1/auth/login") is None
     assert "deployment:approve" not in ROLE_PERMISSIONS["developer"]
     assert "git:push" not in ROLE_PERMISSIONS["reviewer"]
 
@@ -111,6 +123,8 @@ def test_login_issues_httponly_session_and_me_returns_role(monkeypatch):
         assert me.status_code == 200
         assert me.json()["role"] == "platform_owner"
         assert me.json()["organization_id"] == "inzozi-digital"
+        assert me.json()["user_id"] == BOOTSTRAP_USER_ID
+        assert me.json()["session_version"] == 0
         session_keys = [key for key in fake._values if key.startswith(f"{KEY_PREFIX}:session:")]
         assert len(session_keys) == 1
     get_settings.cache_clear()
@@ -248,7 +262,13 @@ def test_logout_revokes_session_and_replay_is_rejected(monkeypatch):
 
 def test_missing_redis_session_rejects_otherwise_valid_cookie(monkeypatch):
     fake = _configure_auth(monkeypatch)
-    token, _ = create_session_token("owner@inzozidigital.com", "platform_owner", "inzozi-digital")
+    token, _ = create_session_token(
+        "owner@inzozidigital.com",
+        "platform_owner",
+        "inzozi-digital",
+        user_id=BOOTSTRAP_USER_ID,
+        session_version=0,
+    )
     with TestClient(_test_app()) as client:
         client.cookies.set(SESSION_COOKIE, token)
         response = client.get("/v1/auth/me")
@@ -261,12 +281,20 @@ def test_missing_redis_session_rejects_otherwise_valid_cookie(monkeypatch):
 
 def test_mismatched_session_fingerprint_is_rejected(monkeypatch):
     fake = _configure_auth(monkeypatch)
-    token, _expires_at = create_session_token("owner@inzozidigital.com", "platform_owner", "inzozi-digital")
+    token, _expires_at = create_session_token(
+        "owner@inzozidigital.com",
+        "platform_owner",
+        "inzozi-digital",
+        user_id=BOOTSTRAP_USER_ID,
+        session_version=0,
+    )
     principal = decode_session_token(token)
     wrong = session_claims_fingerprint(
         email="other@inzozidigital.com",
         role=principal.role,
         organization_id=principal.organization_id,
+        user_id=principal.user_id,
+        session_version=principal.session_version,
     )
     fake._values[f"{KEY_PREFIX}:session:{principal.session_id}"] = wrong
     with TestClient(_test_app()) as client:

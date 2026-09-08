@@ -12,9 +12,11 @@ from typing import Final
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import get_settings
+from app.security.identity_store import IdentityStoreError, get_user_by_id
 from app.security.redis_controls import (
     AuthStateUnavailableError,
     SessionInactiveError,
@@ -24,6 +26,11 @@ from app.security.redis_controls import (
 
 SESSION_COOKIE: Final[str] = "inzozi_session"
 PASSWORD_SCHEME: Final[str] = "pbkdf2_sha256"
+BOOTSTRAP_USER_ID: Final[str] = "00000000-0000-4000-8000-000000000001"
+# Fixed PBKDF2 hash used only for timing equalization on unknown/inactive logins.
+DUMMY_PASSWORD_HASH: Final[str] = (
+    "pbkdf2_sha256$600000$MDAwMDAwMDAwMDAwMDAwMA$8sI32DxUv6sC38gqNjBsLqkPMJJGpFXlGAEfk6K0DxE"
+)
 ROLE_NAMES: Final[tuple[str, ...]] = (
     "platform_owner",
     "org_admin",
@@ -72,8 +79,14 @@ ROLE_PERMISSIONS: Final[dict[str, frozenset[str]]] = {
     "viewer": frozenset({"agent:use", "workspace:read"}),
 }
 
-PUBLIC_PATHS: Final[frozenset[str]] = frozenset({"/", "/health", "/ready", "/v1/auth/login"})
+PUBLIC_PATHS: Final[frozenset[str]] = frozenset(
+    {"/", "/health", "/ready", "/v1/auth/login", "/v1/auth/activate"}
+)
 WORKSPACE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^/v1/workspaces/[0-9a-f]{32}(?:/|$)")
+UUID_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 class AuthenticationError(RuntimeError):
@@ -88,6 +101,8 @@ class AuthPrincipal:
     permissions: frozenset[str]
     session_id: str
     expires_at: datetime | None
+    user_id: str
+    session_version: int
     auth_enabled: bool = True
 
     def has(self, permission: str) -> bool:
@@ -98,10 +113,16 @@ class AuthPrincipal:
             "email": self.email,
             "role": self.role,
             "organization_id": self.organization_id,
+            "user_id": self.user_id,
+            "session_version": self.session_version,
             "permissions": sorted(self.permissions),
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "auth_enabled": self.auth_enabled,
         }
+
+
+def looks_like_uuid(value: str | None) -> bool:
+    return bool(value and UUID_RE.fullmatch(value))
 
 
 def _b64url_encode(data: bytes) -> str:
@@ -148,16 +169,25 @@ def _session_secret() -> bytes:
     return secret.encode("utf-8")
 
 
-def create_session_token(email: str, role: str, organization_id: str) -> tuple[str, datetime]:
+def create_session_token(
+    email: str,
+    role: str,
+    organization_id: str,
+    *,
+    user_id: str,
+    session_version: int,
+) -> tuple[str, datetime]:
     settings = get_settings()
     if role not in ROLE_PERMISSIONS:
         raise AuthenticationError("Configured authentication role is invalid")
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=settings.auth_session_ttl_minutes)
     payload = {
+        "uid": user_id,
         "sub": email.casefold(),
         "role": role,
         "org": organization_id,
+        "sv": int(session_version),
         "iat": int(now.timestamp()),
         "exp": int(expires_at.timestamp()),
         "jti": secrets.token_urlsafe(18),
@@ -181,6 +211,8 @@ def decode_session_token(token: str) -> AuthPrincipal:
         email = str(payload["sub"])
         role = str(payload["role"])
         organization_id = str(payload["org"])
+        user_id = str(payload["uid"])
+        session_version = int(payload["sv"])
         session_id = str(payload["jti"])
         expires_timestamp = int(payload["exp"])
         issued_timestamp = int(payload["iat"])
@@ -200,6 +232,8 @@ def decode_session_token(token: str) -> AuthPrincipal:
         permissions=ROLE_PERMISSIONS[role],
         session_id=session_id,
         expires_at=datetime.fromtimestamp(expires_timestamp, tz=timezone.utc),
+        user_id=user_id,
+        session_version=session_version,
     )
 
 
@@ -212,6 +246,8 @@ def development_principal() -> AuthPrincipal:
         permissions=ROLE_PERMISSIONS["platform_owner"],
         session_id="auth-disabled",
         expires_at=None,
+        user_id="development",
+        session_version=0,
         auth_enabled=False,
     )
 
@@ -219,6 +255,8 @@ def development_principal() -> AuthPrincipal:
 def permission_for_request(method: str, path: str) -> str | None:
     if not path.startswith("/v1/"):
         return None
+    if path.startswith("/v1/auth/users"):
+        return "rbac:admin"
     if path.startswith("/v1/auth/"):
         return None
     if path.startswith("/v1/github-app"):
@@ -286,6 +324,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             email=principal.email,
             role=principal.role,
             organization_id=principal.organization_id,
+            user_id=principal.user_id,
+            session_version=principal.session_version,
         )
         try:
             await validate_session(jti=principal.session_id, fingerprint=fingerprint)
@@ -298,6 +338,27 @@ class AuthMiddleware(BaseHTTPMiddleware):
             response = JSONResponse(status_code=401, content={"detail": "Session expired or invalid"})
             response.delete_cookie(SESSION_COOKIE, path="/")
             return response
+
+        if settings.auth_identity_mode == "database":
+            try:
+                durable = await run_in_threadpool(get_user_by_id, principal.user_id)
+            except IdentityStoreError:
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": "Identity store unavailable"},
+                )
+            if (
+                durable is None
+                or durable.status != "active"
+                or durable.user_id != principal.user_id
+                or durable.email.casefold() != principal.email.casefold()
+                or durable.organization_id != principal.organization_id
+                or durable.role != principal.role
+                or durable.session_version != principal.session_version
+            ):
+                response = JSONResponse(status_code=401, content={"detail": "Session expired or invalid"})
+                response.delete_cookie(SESSION_COOKIE, path="/")
+                return response
 
         request.state.principal = principal
 

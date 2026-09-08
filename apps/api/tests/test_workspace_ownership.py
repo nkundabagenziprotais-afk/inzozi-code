@@ -84,11 +84,37 @@ def test_principal_access_is_org_and_owner_scoped():
         organization_id = "inzozi-digital"
         email = "developer@inzozidigital.com"
         role = "developer"
+        user_id = "11111111-1111-4111-8111-111111111111"
 
     principal = Principal()
     assert principal_can_access(principal, _ownership()) is True
     assert principal_can_access(principal, _ownership(owner_email="other@inzozidigital.com")) is False
     assert principal_can_access(principal, _ownership(organization_id="other-org")) is False
+
+    user_owned = WorkspaceOwnership(
+        workspace_id=WORKSPACE_ID,
+        organization_id="inzozi-digital",
+        owner_email="other@inzozidigital.com",
+        owner_role="developer",
+        repository_url="https://github.com/example/private-repo",
+        namespace=workspace_namespace("inzozi-digital", "other@inzozidigital.com"),
+        created_at=datetime.now(timezone.utc),
+        deleted_at=None,
+        owner_user_id=principal.user_id,
+    )
+    assert principal_can_access(principal, user_owned) is True
+    other = WorkspaceOwnership(
+        workspace_id=WORKSPACE_ID,
+        organization_id="inzozi-digital",
+        owner_email=principal.email,
+        owner_role="developer",
+        repository_url="https://github.com/example/private-repo",
+        namespace=workspace_namespace("inzozi-digital", principal.email),
+        created_at=datetime.now(timezone.utc),
+        deleted_at=None,
+        owner_user_id="22222222-2222-4222-8222-222222222222",
+    )
+    assert principal_can_access(principal, other) is False
 
 
 def test_successful_workspace_create_registers_authenticated_owner(monkeypatch):
