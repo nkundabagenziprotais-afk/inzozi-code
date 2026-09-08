@@ -47,23 +47,23 @@ resource "hcloud_firewall" "staging" {
     direction   = "in"
     protocol    = "tcp"
     port        = "80"
-    source_ips  = var.public_web_cidrs
-    description = "HTTP for staging and ACME challenge"
+    source_ips  = var.http_source_cidrs
+    description = "HTTP only from explicitly approved staging networks"
   }
 
   rule {
     direction   = "in"
     protocol    = "tcp"
     port        = "443"
-    source_ips  = var.public_web_cidrs
-    description = "HTTPS staging access"
+    source_ips  = var.https_source_cidrs
+    description = "HTTPS only from explicitly approved staging networks"
   }
 
   rule {
     direction   = "in"
     protocol    = "icmp"
-    source_ips  = var.public_web_cidrs
-    description = "ICMP for basic network diagnostics"
+    source_ips  = var.ssh_source_cidrs
+    description = "ICMP only from explicitly approved operator networks"
   }
 }
 

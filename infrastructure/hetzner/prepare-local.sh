@@ -58,11 +58,15 @@ For this terminal session, run:
   export SSH_KEY_PATH='${KEY_PATH}'
   export TF_VAR_ssh_public_key="\$(cat '${KEY_PATH}.pub')"
   export TF_VAR_ssh_source_cidrs='["${PUBLIC_IPV4}/32"]'
+  export TF_VAR_http_source_cidrs='["${PUBLIC_IPV4}/32"]'
+  export TF_VAR_https_source_cidrs='["${PUBLIC_IPV4}/32"]'
 
 Security boundary:
 - Enter HCLOUD_TOKEN only in your own terminal or secret manager.
 - Never paste the token, SSH private key, or staging application secrets into Git or chat.
-- If your public IP changes before provisioning, run this script again to refresh the /32 firewall value.
+- HTTP and HTTPS are restricted to your current /32 by default.
+- Keep both web CIDRs restricted while staging remains private.
+- If your public IP changes, run this script again before changing the firewall.
 
 When the variables are set, create staging with:
 

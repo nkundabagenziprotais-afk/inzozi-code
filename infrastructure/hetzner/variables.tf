@@ -64,10 +64,52 @@ variable "ssh_source_cidrs" {
   }
 }
 
-variable "public_web_cidrs" {
-  description = "CIDRs allowed to reach HTTP/HTTPS/ICMP."
+variable "http_source_cidrs" {
+  description = "Explicit CIDRs allowed to reach staging HTTP. No public default is provided."
   type        = list(string)
-  default     = ["0.0.0.0/0", "::/0"]
+
+  validation {
+    condition = (
+      length(var.http_source_cidrs) > 0 &&
+      alltrue([
+        for cidr in var.http_source_cidrs :
+        can(cidrhost(cidr, 0))
+      ])
+    )
+    error_message = "http_source_cidrs must contain at least one explicitly supplied valid CIDR."
+  }
+
+  validation {
+    condition = alltrue([
+      for cidr in var.http_source_cidrs :
+      cidr != "0.0.0.0/0" && cidr != "::/0"
+    ])
+    error_message = "Private staging HTTP may not be opened to the entire internet."
+  }
+}
+
+variable "https_source_cidrs" {
+  description = "Explicit CIDRs allowed to reach staging HTTPS. No public default is provided."
+  type        = list(string)
+
+  validation {
+    condition = (
+      length(var.https_source_cidrs) > 0 &&
+      alltrue([
+        for cidr in var.https_source_cidrs :
+        can(cidrhost(cidr, 0))
+      ])
+    )
+    error_message = "https_source_cidrs must contain at least one explicitly supplied valid CIDR."
+  }
+
+  validation {
+    condition = alltrue([
+      for cidr in var.https_source_cidrs :
+      cidr != "0.0.0.0/0" && cidr != "::/0"
+    ])
+    error_message = "Private staging HTTPS may not be opened to the entire internet."
+  }
 }
 
 variable "workspace_quota_volume_size_gb" {

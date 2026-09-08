@@ -12,7 +12,7 @@ This directory provisions a **disposable** Inzozi Code staging host on Hetzner C
 - backups: disabled
 - delete protection: disabled
 - workspace quota pool: 30 GB XFS volume, project quotas enabled during host configuration
-- HTTP/HTTPS: public
+- HTTP and HTTPS use separate explicitly supplied CIDRs; neither has an internet-wide default
 - SSH: **must** be restricted to explicit operator CIDRs
 
 Always check Hetzner's current server, IPv4, and volume pricing before creating or expanding the host. Pricing is deliberately not hard-coded into the Terraform configuration.
@@ -69,9 +69,16 @@ export HCLOUD_TOKEN='set-this-securely-outside-git'
 export SSH_KEY_PATH="$HOME/.ssh/inzozi_code_staging_ed25519"
 export TF_VAR_ssh_public_key="$(cat "$SSH_KEY_PATH.pub")"
 export TF_VAR_ssh_source_cidrs='["203.0.113.10/32"]'
+export TF_VAR_http_source_cidrs='["203.0.113.10/32"]'
+export TF_VAR_https_source_cidrs='["203.0.113.10/32"]'
 ```
 
 Do not paste the real token or private key into project files or chat.
+
+`http_source_cidrs` and `https_source_cidrs` have no defaults.
+For private staging, normally keep both restricted to the operator's current
+`/32`, just like SSH. This HTTPS hardening phase does not enable public DNS
+or internet-wide ingress.
 
 ## Create
 
@@ -129,12 +136,17 @@ After the host and quota storage are verified:
 1. Put the **reviewed** Git checkout at `/srv/inzozi-code/application`.
 2. Create `/srv/inzozi-code/.env.staging` on the server with mode `600`.
 3. Mount the GitHub App PEM into the API container through the staging Compose override; never commit it.
-4. Configure host Nginx from `infrastructure/staging/host-nginx.conf.template`.
-5. Keep public DNS disabled until every public-staging security blocker is accepted.
-6. Request TLS only after DNS resolves correctly.
-7. Run `infrastructure/staging/deploy-staging.sh` on the server.
-8. Run `infrastructure/staging/dedicated-workspace-preflight.sh`; it must prove the XFS hard quota in addition to the existing broker/runtime boundaries.
-9. Verify `/health`, logs, Git commit SHA, and UI at 360, 430, 768, 1280, 1440, and 1920 px.
+4. Keep both HTTP and HTTPS firewall CIDRs restricted to the approved operator network.
+5. Set `AUTH_COOKIE_SECURE=true` in the mode-600 staging environment before the reviewed HTTPS deployment.
+6. Export the exact reviewed 40-character SHA as `EXPECTED_COMMIT_SHA`.
+7. Deploy that exact checkout first with `EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA}" infrastructure/staging/deploy-staging.sh`; Docker Nginx remains bound to host loopback only.
+8. Run `REQUIRE_SECURE_COOKIE=true infrastructure/staging/auth-preflight.sh` and confirm the running API loaded the secure-cookie setting.
+9. Activate the reviewed private HTTP vhost with `sudo EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA}" MODE=http infrastructure/staging/configure-host-nginx.sh`.
+10. Generate the short-lived private staging TLS identity with `sudo infrastructure/staging/prepare-private-tls.sh`; this requires no public DNS.
+11. Activate private HTTPS with `sudo EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA}" MODE=https infrastructure/staging/configure-host-nginx.sh`.
+12. Run `EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA}" infrastructure/staging/https-preflight.sh` only after the reviewed Docker and host-Nginx configuration is live.
+13. Run `infrastructure/staging/dedicated-workspace-preflight.sh`.
+14. Keep public DNS disabled; a publicly trusted certificate and public ingress remain a separate future release gate.
 
 ## Destroy when review is complete
 

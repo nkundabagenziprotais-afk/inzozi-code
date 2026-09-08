@@ -49,7 +49,7 @@ Hetzner staging host created.
 Next steps:
 1. Wait for cloud-init to finish.
 2. Run infrastructure/hetzner/bootstrap.sh.
-3. Point temporary staging DNS only after the host is verified.
+3. Keep public DNS disabled while staging remains private.
 4. Deploy the reviewed application commit.
 5. Run infrastructure/hetzner/down.sh when review is complete.
 EOF

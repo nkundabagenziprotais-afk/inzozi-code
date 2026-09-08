@@ -63,6 +63,9 @@ jobs:
       - name: Validate staging shell scripts
         run: |
           bash -n infrastructure/staging/bootstrap-host.sh
+          bash -n infrastructure/staging/configure-host-nginx.sh
+          bash -n infrastructure/staging/prepare-private-tls.sh
+          bash -n infrastructure/staging/https-preflight.sh
           bash -n infrastructure/staging/deploy-staging.sh
           bash -n infrastructure/staging/github-app-preflight.sh
           bash -n infrastructure/staging/auth-preflight.sh
@@ -77,6 +80,140 @@ jobs:
           bash -n infrastructure/hetzner/configure-workspace-broker.sh
           bash -n infrastructure/hetzner/configure-workspace-quota-storage.sh
           bash -n infrastructure/hetzner/down.sh
+      - name: Validate HTTPS staging templates
+        run: |
+          grep -q 'listen 80 default_server;' infrastructure/staging/host-nginx-http.conf.template
+          grep -q 'listen 443 ssl http2 default_server;' infrastructure/staging/host-nginx.conf.template
+          grep -q 'return 308 https://$host$request_uri;' infrastructure/staging/host-nginx.conf.template
+          grep -q 'Strict-Transport-Security' infrastructure/staging/host-nginx.conf.template
+          grep -q 'Permissions-Policy' infrastructure/staging/host-nginx.conf.template
+          grep -q '/etc/inzozi-code/tls/code-staging.inzozidigital.com/' infrastructure/staging/host-nginx.conf.template
+          grep -q 'map $http_x_real_ip $inzozi_client_ip' infrastructure/nginx/default.conf
+          grep -q 'proxy_set_header X-Real-IP $inzozi_client_ip;' infrastructure/nginx/default.conf
+          grep -q 'proxy_set_header X-Forwarded-Proto $inzozi_forwarded_proto;' infrastructure/nginx/default.conf
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          lines = [
+              raw.strip().rstrip(";")
+              for raw in Path(
+                  "infrastructure/staging/host-nginx.conf.template"
+              ).read_text().splitlines()
+              if raw.strip().startswith("ssl_protocols ")
+          ]
+
+          if not lines:
+              raise SystemExit("No active ssl_protocols directives")
+
+          expected = ["TLSv1.2", "TLSv1.3"]
+
+          for line in lines:
+              protocols = line.split()[1:]
+
+              if protocols != expected:
+                  raise SystemExit(
+                      f"Invalid TLS protocol policy: {protocols!r}"
+                  )
+
+          print("TLS_PROTOCOL_POLICY=PASS")
+          PY
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          installer = Path(
+              "infrastructure/staging/configure-host-nginx.sh"
+          ).read_text()
+
+          activation = installer.index(
+              'install -m 0644 "${TEMPLATE}" "${CANDIDATE}"'
+          )
+
+          activation_tail = installer[activation:]
+
+          remove_default = activation_tail.index(
+              'rm -f "${DEFAULT_ENABLED}"'
+          )
+
+          first_active_nginx_test = activation_tail.index(
+              'if ! nginx -t; then'
+          )
+
+          if remove_default > first_active_nginx_test:
+              raise SystemExit(
+                  "Ubuntu default site must be removed before candidate nginx -t"
+              )
+
+          for reviewed_path in (
+              "infrastructure/staging/configure-host-nginx.sh",
+              "infrastructure/staging/deploy-staging.sh",
+              "infrastructure/staging/https-preflight.sh",
+          ):
+              reviewed_text = Path(reviewed_path).read_text()
+
+              if "EXPECTED_COMMIT_SHA" not in reviewed_text:
+                  raise SystemExit(
+                      f"Missing reviewed-SHA boundary: {reviewed_path}"
+                  )
+
+          variables = Path(
+              "infrastructure/hetzner/variables.tf"
+          ).read_text()
+
+          if variables.count(
+              'cidr != "0.0.0.0/0"'
+          ) < 3:
+              raise SystemExit(
+                  "IPv4 internet-wide CIDR rejection is incomplete"
+              )
+
+          if variables.count(
+              'cidr != "::/0"'
+          ) < 3:
+              raise SystemExit(
+                  "IPv6 internet-wide CIDR rejection is incomplete"
+              )
+
+          print("HOST_NGINX_ACTIVATION_ORDER=PASS")
+          print("REVIEWED_SHA_BOUNDARIES=PASS")
+          print("PRIVATE_WEB_CIDR_REJECTION=PASS")
+          PY
+
+          TMP_TLS="$(mktemp -d)"
+          trap 'rm -rf "${TMP_TLS}"' EXIT
+
+          mkdir -p \
+            "${TMP_TLS}/certs"
+
+          openssl req \
+            -x509 \
+            -newkey rsa:2048 \
+            -nodes \
+            -days 1 \
+            -subj '/CN=code-staging.inzozidigital.com' \
+            -keyout "${TMP_TLS}/certs/privkey.pem" \
+            -out "${TMP_TLS}/certs/fullchain.pem" \
+            >/dev/null 2>&1
+
+          docker run --rm \
+            -v "$PWD/infrastructure/staging/host-nginx-http.conf.template:/etc/nginx/conf.d/default.conf:ro" \
+            nginx:1.27-alpine \
+            nginx -t
+
+          docker run --rm \
+            -v "$PWD/infrastructure/staging/host-nginx.conf.template:/etc/nginx/conf.d/default.conf:ro" \
+            -v "${TMP_TLS}/certs:/etc/inzozi-code/tls/code-staging.inzozidigital.com:ro" \
+            nginx:1.27-alpine \
+            nginx -t
+
+          docker run --rm \
+            --add-host api:127.0.0.1 \
+            --add-host web:127.0.0.1 \
+            -v "$PWD/infrastructure/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginx:1.27-alpine \
+            nginx -t
+
       - name: Validate Hetzner Terraform
         working-directory: infrastructure/hetzner
         run: |
