@@ -16,6 +16,9 @@ workspaces/
 logs/
 secrets/
 *.pem
+*.key
+*.p12
+*.pfx
 .terraform/
 *.tfstate
 *.tfstate.*
