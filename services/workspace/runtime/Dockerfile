@@ -12,7 +12,13 @@ WORKDIR /runtime
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir .
 COPY app ./app
-RUN chmod 0555 /runtime/app/git_askpass.sh
+
+# Docker COPY preserves build-context modes. Normalize the runtime
+# application tree so helper readability cannot depend on the host
+# checkout umask or stale working-tree permissions.
+RUN find /runtime/app -type d -exec chmod 0755 {} + \
+    && find /runtime/app -type f -exec chmod 0644 {} + \
+    && chmod 0555 /runtime/app/git_askpass.sh
 
 RUN useradd --create-home --uid 10002 workspace \
     && mkdir -p /workspaces \
