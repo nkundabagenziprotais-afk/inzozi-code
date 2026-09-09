@@ -73,3 +73,49 @@ def test_remote_push_accepts_only_safe_branches():
     assert not SAFE_PUSH_BRANCH_RE.fullmatch("main")
     assert not SAFE_PUSH_BRANCH_RE.fullmatch("Feature/Uppercase")
     assert not SAFE_PUSH_BRANCH_RE.fullmatch("../../escape")
+
+
+def test_github_git_environment_preserves_restricted_proxy_without_copying_secrets(
+    monkeypatch,
+):
+    proxy = "http://workspace-egress-proxy:3128"
+
+    monkeypatch.setenv("HTTPS_PROXY", proxy)
+    monkeypatch.setenv("https_proxy", proxy)
+    monkeypatch.setenv("HTTP_PROXY", proxy)
+    monkeypatch.setenv("http_proxy", proxy)
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setenv("no_proxy", "")
+
+    monkeypatch.setenv(
+        "AUTH_SESSION_SECRET",
+        "must-not-enter-git-environment",
+    )
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "must-not-enter-git-environment",
+    )
+    monkeypatch.setenv(
+        "ALL_PROXY",
+        "must-not-enter-git-environment",
+    )
+
+    env = github_git_environment(
+        "short-lived-installation-token"
+    )
+
+    assert env["HTTPS_PROXY"] == proxy
+    assert env["https_proxy"] == proxy
+    assert env["HTTP_PROXY"] == proxy
+    assert env["http_proxy"] == proxy
+    assert env["NO_PROXY"] == ""
+    assert env["no_proxy"] == ""
+
+    assert (
+        env["WORKSPACE_GIT_TOKEN"]
+        == "short-lived-installation-token"
+    )
+
+    assert "AUTH_SESSION_SECRET" not in env
+    assert "DATABASE_URL" not in env
+    assert "ALL_PROXY" not in env
