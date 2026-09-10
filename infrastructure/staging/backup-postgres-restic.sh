@@ -6,6 +6,7 @@ APP_ROOT="${APP_ROOT:-/srv/inzozi-code/application}"
 ENV_FILE="${ENV_FILE:-/srv/inzozi-code/.env.staging}"
 RESTIC_ENV_FILE="${RESTIC_ENV_FILE:-/srv/inzozi-code/secrets/restic.env}"
 LOCK_FILE="${LOCK_FILE:-/run/lock/inzozi-code-postgres-backup.lock}"
+BACKUP_STATE_FILE="${BACKUP_STATE_FILE:-/srv/inzozi-code/backups/postgres-last-success}"
 STAGING_COMPOSE="${APP_ROOT}/infrastructure/staging/docker-compose.staging.yml"
 
 log() {
@@ -32,6 +33,21 @@ require_private_file() {
       fail "secret-file-mode-must-be-400-or-600"
       ;;
   esac
+}
+
+write_success_marker() {
+  local epoch="$1"
+  local state_dir
+  local tmp
+
+  state_dir="$(dirname "$BACKUP_STATE_FILE")"
+  install -d -m 0700 "$state_dir"
+
+  tmp="$(mktemp "${state_dir}/.postgres-last-success.XXXXXX")"
+  chmod 0600 "$tmp"
+  printf '%s\n' "$epoch" > "$tmp"
+  mv -f "$tmp" "$BACKUP_STATE_FILE"
+  chmod 0600 "$BACKUP_STATE_FILE"
 }
 
 [[ "${EUID}" -eq 0 ]] || fail "must-run-as-root"
@@ -91,7 +107,7 @@ if ! docker exec "$POSTGRES_CID" sh -lc '
   fail "postgres-not-ready"
 fi
 
-if ! restic snapshots --no-lock --json >/dev/null; then
+if ! restic snapshots --json >/dev/null; then
   fail "restic-repository-unreachable"
 fi
 
@@ -131,6 +147,12 @@ set -e
 
 [[ "$BACKUP_RC" -eq 0 ]] || fail "pg-dump-or-restic-backup-failed"
 
+SUCCESS_EPOCH="$(date +%s)"
+write_success_marker "$SUCCESS_EPOCH"
+
+log "POSTGRES_BACKUP_UPLOAD=PASS"
+log "BACKUP_FRESHNESS_MARKER=PASS"
+
 if ! restic forget \
   --quiet \
   --tag postgres \
@@ -140,13 +162,13 @@ if ! restic forget \
   --keep-weekly 4 \
   --keep-monthly 3
 then
+  log "RESTIC_RETENTION_POLICY=FAIL"
   fail "restic-retention-failed-after-successful-backup"
 fi
 
 END_EPOCH="$(date +%s)"
 DURATION="$((END_EPOCH - START_EPOCH))"
 
-log "POSTGRES_BACKUP_UPLOAD=PASS"
 log "RESTIC_RETENTION_POLICY=PASS"
 log "BACKUP_DURATION_SECONDS=${DURATION}"
 log "BACKUP_RPO_TARGET_HOURS=6"
