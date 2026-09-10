@@ -1,0 +1,12 @@
+[Unit]
+Description=Schedule Inzozi Code staging Restic integrity checks
+
+[Timer]
+OnCalendar=Sun *-*-* 03:30:00
+RandomizedDelaySec=30min
+Persistent=true
+AccuracySec=5min
+Unit=inzozi-code-restic-check.service
+
+[Install]
+WantedBy=timers.target
