@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule Inzozi Code staging operational readiness monitoring
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=5min
+AccuracySec=30s
+Unit=inzozi-code-ops-monitor.service
+
+[Install]
+WantedBy=timers.target
