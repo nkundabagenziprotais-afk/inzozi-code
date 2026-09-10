@@ -136,7 +136,7 @@ PY
   exit 1
 }
 
-for tool in docker curl python3 nginx findmnt; do
+for tool in docker curl python3 nginx findmnt openssl; do
   command -v "$tool" >/dev/null 2>&1 || {
     printf 'MONITOR_ERROR=missing-tool-%s\n' "$tool" >&2
     exit 1
@@ -345,20 +345,29 @@ fi
 
 if [[ -f "$ACCESS_LOG" ]]; then
   FIVE_XX_COUNT="$(
-    tail -n 5000 "$ACCESS_LOG" 2>/dev/null |
-    python3 - "$FIVE_XX_WINDOW_SECONDS" <<'PY'
+    python3 - \
+      "$ACCESS_LOG" \
+      "$FIVE_XX_WINDOW_SECONDS" <<'PY'
+from collections import deque
+from datetime import datetime, timezone
 import re
 import sys
-from datetime import datetime, timezone
 
-window = int(sys.argv[1])
+path = sys.argv[1]
+window = int(sys.argv[2])
 now = datetime.now(timezone.utc)
 pattern = re.compile(
     r'\[(?P<ts>[^\]]+)\]\s+"[^"]*"\s+(?P<status>\d{3})\s'
 )
 count = 0
 
-for line in sys.stdin:
+try:
+    with open(path, "r", encoding="utf-8", errors="replace") as handle:
+        lines = deque(handle, maxlen=5000)
+except OSError:
+    raise SystemExit(2)
+
+for line in lines:
     match = pattern.search(line)
     if not match:
         continue
@@ -378,7 +387,7 @@ for line in sys.stdin:
 
 print(count)
 PY
-  )"
+  )" || FIVE_XX_COUNT='INVALID'
 
   if [[ "$FIVE_XX_COUNT" =~ ^[0-9]+$ ]]; then
     if (( FIVE_XX_COUNT >= FIVE_XX_CRITICAL_THRESHOLD )); then
