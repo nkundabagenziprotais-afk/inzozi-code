@@ -1,0 +1,18 @@
+[Unit]
+Description=Inzozi Code staging Restic repository integrity check
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/sbin/inzozi-code-restic-check
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=2h
