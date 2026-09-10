@@ -87,7 +87,7 @@ Server secrets are never committed to Git. Recovery requires separately controll
 
 ### Backup mechanism
 
-Use a PostgreSQL logical backup with `pg_dump --format=custom` from the running PostgreSQL container. The dump is written to a root-controlled local spool under `/srv/inzozi-code/backups` and is uploaded to an **off-host Restic repository**.
+Use a PostgreSQL logical backup with `pg_dump --format=custom` from the running PostgreSQL container. The reviewed backup script streams the custom dump directly into an **off-host Restic repository** using Restic stdin backup mode, so no plaintext database dump is written to local disk.
 
 Restic is selected because it provides client-side authenticated encryption, repository integrity checking, retention policies, and restore without placing plaintext database dumps in an external object store.
 
@@ -110,17 +110,17 @@ Initial public-staging retention policy:
 
 Retention must be executed by Restic `forget` using the reviewed policy. Pruning should be separated from the critical backup success path when practical so a retention failure cannot invalidate a successfully uploaded new backup.
 
-### Local plaintext handling
+### Plaintext handling
 
-- local dump directory: root-only;
-- dump files: mode `0600`;
-- temporary plaintext dump is deleted only after Restic confirms the snapshot was committed;
-- interrupted runs must leave no world-readable file;
-- filenames must contain no email address, token, credential, user identifier, or repository secret.
+- the database dump is streamed from `pg_dump` to Restic and is not persisted as a local plaintext file;
+- Restic repository encryption occurs client-side before off-host storage;
+- root-only Restic credentials/password files must be mode `0400` or `0600`;
+- backup filenames must contain no email address, token, credential, user identifier, or repository secret;
+- interrupted runs must not leave a local plaintext database dump.
 
 ### Verification
 
-The backup workflow records only sanitized operational markers such as timestamp, duration, dump byte count, Restic snapshot success, and retention/check result.
+The backup workflow records only sanitized operational markers such as timestamp, duration, Restic snapshot success, and retention/check result.
 
 At least weekly, run `restic check`. Public-staging acceptance additionally requires a full restore test of a current snapshot.
 
@@ -131,13 +131,14 @@ A restore test must not overwrite the accepted live PostgreSQL volume.
 The reviewed restore-test workflow must:
 
 1. fetch a selected Restic snapshot from off-host storage;
-2. create an explicitly labelled diagnostic PostgreSQL 16 recovery container and dedicated diagnostic Docker volume/network;
-3. restore the custom dump into the isolated recovery database;
-4. verify schema presence and non-secret row-count invariants;
-5. verify that the expected single active Platform Owner state is present at the selected backup point, without printing identity values;
-6. verify workspace ownership/audit tables can be queried;
-7. remove only the explicitly labelled diagnostic container/network/volume after evidence is captured;
-8. leave the accepted live database, Redis, workspace pool, firewall, DNS, and source checkout unchanged.
+2. create an explicitly labelled diagnostic PostgreSQL 16 recovery container and dedicated diagnostic Docker volume;
+3. run the diagnostic database with `--network none` and no published ports;
+4. stream the Restic dump directly into `pg_restore` in the isolated recovery database;
+5. verify schema presence and non-secret row-count invariants;
+6. verify that the expected single active Platform Owner state is present at the selected backup point, without printing identity values;
+7. verify workspace ownership/audit tables can be queried;
+8. remove only the explicitly labelled diagnostic container/volume after evidence is captured;
+9. leave the accepted live database, Redis, workspace pool, firewall, DNS, and source checkout unchanged.
 
 No direct restore into the live database is part of acceptance.
 
@@ -215,7 +216,7 @@ The rollback runbook must distinguish **application/edge rollback** from **datab
 
 ## Terraform drift and provider protection
 
-The live accepted firewall has no ICMP rule, while `infrastructure/hetzner/main.tf` still declares one. The branch must remove that stale rule before any future Terraform apply.
+The accepted live firewall has no ICMP rule. The Issue #39 branch removes the stale ICMP declaration from `infrastructure/hetzner/main.tf`; this is a repository-only reconciliation and does not authorize or perform Terraform apply.
 
 Provider backups/delete/rebuild protection are currently disabled. Enabling provider backups may create recurring cost and therefore requires a separate explicit operator decision before apply. Issue #39 can be accepted using the reviewed encrypted off-host PostgreSQL backup mechanism even if provider image backups remain disabled, provided restore acceptance passes.
 
