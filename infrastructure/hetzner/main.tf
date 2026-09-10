@@ -58,13 +58,6 @@ resource "hcloud_firewall" "staging" {
     source_ips  = var.https_source_cidrs
     description = "HTTPS only from explicitly approved staging networks"
   }
-
-  rule {
-    direction   = "in"
-    protocol    = "icmp"
-    source_ips  = var.ssh_source_cidrs
-    description = "ICMP only from explicitly approved operator networks"
-  }
 }
 
 resource "hcloud_server" "staging" {
