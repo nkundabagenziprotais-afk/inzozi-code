@@ -46,8 +46,10 @@ ACTUAL_SHA="$(git rev-parse HEAD)"
 [[ -z "$(git status --porcelain)" ]] || fail "checkout-dirty"
 
 for path in \
+  infrastructure/staging/initialize-restic-repository.sh \
   infrastructure/staging/backup-postgres-restic.sh \
   infrastructure/staging/check-restic-repository.sh \
+  infrastructure/staging/restore-postgres-restic-test.sh \
   infrastructure/staging/monitor-operations.sh \
   infrastructure/staging/systemd/inzozi-code-postgres-backup.service \
   infrastructure/staging/systemd/inzozi-code-postgres-backup.timer \
@@ -76,12 +78,20 @@ install -d -m 0700 /srv/inzozi-code/secrets
 install -d -m 0700 /srv/inzozi-code/backups
 
 install -m 0755 \
+  infrastructure/staging/initialize-restic-repository.sh \
+  /usr/local/sbin/inzozi-code-restic-init
+
+install -m 0755 \
   infrastructure/staging/backup-postgres-restic.sh \
   /usr/local/sbin/inzozi-code-postgres-backup
 
 install -m 0755 \
   infrastructure/staging/check-restic-repository.sh \
   /usr/local/sbin/inzozi-code-restic-check
+
+install -m 0755 \
+  infrastructure/staging/restore-postgres-restic-test.sh \
+  /usr/local/sbin/inzozi-code-postgres-restore-test
 
 install -m 0755 \
   infrastructure/staging/monitor-operations.sh \
@@ -111,7 +121,7 @@ for unit in \
   inzozi-code-ops-monitor.timer
 do
   systemd-analyze verify "/etc/systemd/system/${unit}" >/dev/null
- done
+done
 
 printf '%s\n' 'ISSUE39_OPERATIONS_INSTALL=PASS'
 printf '%s\n' 'REVIEWED_SHA_BOUNDARY=PASS'
