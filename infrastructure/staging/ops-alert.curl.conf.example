@@ -1,0 +1,9 @@
+# Example only. Copy to /srv/inzozi-code/secrets/ops-alert.curl.conf as root,
+# set mode 0600, and replace the endpoint/credential out-of-band.
+# The populated file must never be committed or printed.
+
+url = "https://operator-alert-endpoint.invalid/"
+request = "POST"
+
+# If the selected endpoint requires authentication, add the header here, e.g.
+# header = "Authorization: Bearer replace-out-of-band"
