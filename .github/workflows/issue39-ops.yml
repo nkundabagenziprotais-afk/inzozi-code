@@ -28,6 +28,7 @@ jobs:
 
       - name: Validate Issue 39 shell syntax
         run: |
+          bash -n infrastructure/staging/initialize-restic-repository.sh
           bash -n infrastructure/staging/backup-postgres-restic.sh
           bash -n infrastructure/staging/check-restic-repository.sh
           bash -n infrastructure/staging/restore-postgres-restic-test.sh
@@ -53,6 +54,9 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
+          init = Path(
+              'infrastructure/staging/initialize-restic-repository.sh'
+          ).read_text()
           backup = Path(
               'infrastructure/staging/backup-postgres-restic.sh'
           ).read_text()
@@ -71,6 +75,16 @@ jobs:
           rollback = Path(
               'infrastructure/staging/rollback-private-staging.sh'
           ).read_text()
+
+          required_init = (
+              'CONFIRM_RESTIC_INIT',
+              'restic cat config',
+              'restic init',
+              'RESTIC_SECRET_VALUES_PRINTED=NO',
+          )
+          for item in required_init:
+              if item not in init:
+                  raise SystemExit(f'Missing Restic init guard: {item}')
 
           required_backup = (
               'pg_dump',
@@ -119,6 +133,7 @@ jobs:
               'EXPECTED_COMMIT_SHA',
               'ACTIVATE_TIMERS',
               'INSTALL_RESTIC',
+              'inzozi-code-restic-init',
               'systemctl enable --now',
               'backup-older-than-seven-hours',
           )
