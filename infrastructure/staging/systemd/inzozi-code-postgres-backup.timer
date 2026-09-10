@@ -1,0 +1,12 @@
+[Unit]
+Description=Schedule Inzozi Code staging PostgreSQL backups
+
+[Timer]
+OnCalendar=*-*-* 00,05,10,15,20:00:00
+RandomizedDelaySec=10min
+Persistent=true
+AccuracySec=1min
+Unit=inzozi-code-postgres-backup.service
+
+[Install]
+WantedBy=timers.target

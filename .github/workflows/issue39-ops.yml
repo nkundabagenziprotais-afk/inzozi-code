@@ -1,0 +1,215 @@
+name: Issue 39 Ops Readiness
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/issue39-ops.yml'
+      - 'docs/issue39-operations-readiness.md'
+      - 'infrastructure/hetzner/**'
+      - 'infrastructure/staging/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue39-ops.yml'
+      - 'docs/issue39-operations-readiness.md'
+      - 'infrastructure/hetzner/**'
+      - 'infrastructure/staging/**'
+
+jobs:
+  ops-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: '1.16.1'
+          terraform_wrapper: false
+
+      - name: Validate Issue 39 shell syntax
+        run: |
+          bash -n infrastructure/staging/initialize-restic-repository.sh
+          bash -n infrastructure/staging/backup-postgres-restic.sh
+          bash -n infrastructure/staging/check-restic-repository.sh
+          bash -n infrastructure/staging/restore-postgres-restic-test.sh
+          bash -n infrastructure/staging/monitor-operations.sh
+          bash -n infrastructure/staging/install-operations-readiness.sh
+          bash -n infrastructure/staging/configure-docker-log-rotation.sh
+          bash -n infrastructure/staging/rollback-private-staging.sh
+
+      - name: Validate Issue 39 Terraform reconciliation
+        working-directory: infrastructure/hetzner
+        run: |
+          terraform fmt -check
+          terraform init -backend=false -input=false
+          terraform validate
+
+          if grep -Eq 'protocol[[:space:]]*=[[:space:]]*"icmp"' main.tf; then
+            echo 'Stale ICMP firewall rule remains in Terraform' >&2
+            exit 1
+          fi
+
+      - name: Validate operational safety invariants
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          init = Path(
+              'infrastructure/staging/initialize-restic-repository.sh'
+          ).read_text()
+          backup = Path(
+              'infrastructure/staging/backup-postgres-restic.sh'
+          ).read_text()
+          restore = Path(
+              'infrastructure/staging/restore-postgres-restic-test.sh'
+          ).read_text()
+          monitor = Path(
+              'infrastructure/staging/monitor-operations.sh'
+          ).read_text()
+          installer = Path(
+              'infrastructure/staging/install-operations-readiness.sh'
+          ).read_text()
+          logging = Path(
+              'infrastructure/staging/configure-docker-log-rotation.sh'
+          ).read_text()
+          rollback = Path(
+              'infrastructure/staging/rollback-private-staging.sh'
+          ).read_text()
+
+          required_init = (
+              'CONFIRM_RESTIC_INIT',
+              'restic cat config',
+              'restic init',
+              'RESTIC_SECRET_VALUES_PRINTED=NO',
+          )
+          for item in required_init:
+              if item not in init:
+                  raise SystemExit(f'Missing Restic init guard: {item}')
+
+          required_backup = (
+              'pg_dump',
+              '--format=custom',
+              'restic backup',
+              '--stdin',
+              'BACKUP_PLAINTEXT_LOCAL_FILE=NO',
+              'postgres-last-success',
+              'RESTIC_RETENTION_POLICY=PASS',
+          )
+          for item in required_backup:
+              if item not in backup:
+                  raise SystemExit(f'Missing backup control: {item}')
+
+          required_restore = (
+              'com.inzozi.code.diagnostic',
+              '--network none',
+              'LIVE_DATABASE_TARGETED=NO',
+              'ACTIVE_PLATFORM_OWNER_COUNT=1',
+              'ISSUE39_ISOLATED_POSTGRES_RESTORE_TEST=PASS',
+          )
+          for item in required_restore:
+              if item not in restore:
+                  raise SystemExit(f'Missing restore control: {item}')
+
+          required_monitor = (
+              '/health',
+              '/ready',
+              'POSTGRES_CONTAINER',
+              'REDIS_CONTAINER',
+              'WORKSPACE_MANAGER_CONTAINER',
+              'WORKSPACE_BROKER_CONTAINER',
+              'WORKSPACE_EGRESS_PROXY_CONTAINER',
+              'POSTGRES_BACKUP_OLDER_THAN_7H',
+              'ROOT_DISK_GE_90',
+              'WORKSPACE_POOL_GE_90',
+              'TLS_EXPIRY_LE_7D',
+              'HTTP_5XX_THRESHOLD_EXCEEDED',
+              'ALERT_CURL_CONFIG_FILE',
+          )
+          for item in required_monitor:
+              if item not in monitor:
+                  raise SystemExit(f'Missing monitor control: {item}')
+
+          required_installer = (
+              'EXPECTED_COMMIT_SHA',
+              'ACTIVATE_TIMERS',
+              'INSTALL_RESTIC',
+              'inzozi-code-restic-init',
+              'systemctl enable --now',
+              'backup-older-than-seven-hours',
+          )
+          for item in required_installer:
+              if item not in installer:
+                  raise SystemExit(f'Missing installer guard: {item}')
+
+          required_logging = (
+              'APPLY_DOCKER_LOG_ROTATION',
+              'RESTART_DOCKER',
+              'max-size',
+              'max-file',
+              'dockerd --validate',
+              'ACTIVE_WORKSPACE_COUNT_BEFORE_DOCKER_RESTART=0',
+          )
+          for item in required_logging:
+              if item not in logging:
+                  raise SystemExit(f'Missing logging guard: {item}')
+
+          required_rollback = (
+              'ROLLBACK_COMMIT_SHA',
+              'CONFIRM_PUBLIC_DNS_DISABLED',
+              'CONFIRM_FIREWALL_PRIVATE',
+              'CONFIRM_DATABASE_RESTORE_NOT_REQUESTED',
+              'GIT_RESET_HARD_USED=NO',
+              'DATABASE_RESTORE_PERFORMED=NO',
+              'ISSUE39_PRIVATE_STAGING_ROLLBACK=PASS',
+          )
+          for item in required_rollback:
+              if item not in rollback:
+                  raise SystemExit(f'Missing rollback guard: {item}')
+
+          if 'git reset --hard' in rollback:
+              raise SystemExit('Rollback must not use git reset --hard')
+
+          print('ISSUE39_OPERATIONAL_SAFETY_INVARIANTS=PASS')
+          PY
+
+      - name: Validate systemd schedules and unit wiring
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('infrastructure/staging/systemd')
+          required = {
+              'inzozi-code-postgres-backup.service': (
+                  'ExecStart=/usr/local/sbin/inzozi-code-postgres-backup',
+                  'UMask=0077',
+              ),
+              'inzozi-code-postgres-backup.timer': (
+                  'OnCalendar=*-*-* 00,05,10,15,20:00:00',
+                  'RandomizedDelaySec=10min',
+                  'Persistent=true',
+              ),
+              'inzozi-code-restic-check.service': (
+                  'ExecStart=/usr/local/sbin/inzozi-code-restic-check',
+              ),
+              'inzozi-code-restic-check.timer': (
+                  'OnCalendar=Sun *-*-* 03:30:00',
+                  'Persistent=true',
+              ),
+              'inzozi-code-ops-monitor.service': (
+                  'ExecStart=/usr/local/sbin/inzozi-code-ops-monitor',
+              ),
+              'inzozi-code-ops-monitor.timer': (
+                  'OnUnitInactiveSec=5min',
+              ),
+          }
+
+          for name, fragments in required.items():
+              text = (root / name).read_text()
+              for fragment in fragments:
+                  if fragment not in text:
+                      raise SystemExit(
+                          f'{name} missing required fragment: {fragment}'
+                      )
+
+          print('ISSUE39_SYSTEMD_WIRING=PASS')
+          PY

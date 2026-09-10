@@ -1,0 +1,16 @@
+[Unit]
+Description=Inzozi Code staging operational readiness monitor
+Wants=docker.service nginx.service
+After=docker.service nginx.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+EnvironmentFile=-/srv/inzozi-code/secrets/ops-monitor.env
+ExecStart=/usr/local/sbin/inzozi-code-ops-monitor
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+TimeoutStartSec=2min
