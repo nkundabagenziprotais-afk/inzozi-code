@@ -16,7 +16,9 @@ import './studio-engineering-sync.css'
 import './module-delivery.css'
 import './unified-shell.css'
 import './brand.css'
+import './inzozi-engineering-experience.css'
 import './unified-shell'
+import './inzozi-engineering-experience'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

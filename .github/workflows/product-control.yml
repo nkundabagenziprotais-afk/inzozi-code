@@ -22,6 +22,8 @@ on:
       - 'apps/web/src/module-delivery.css'
       - 'apps/web/src/unified-shell.css'
       - 'apps/web/src/unified-shell.ts'
+      - 'apps/web/src/inzozi-engineering-experience.ts'
+      - 'apps/web/src/inzozi-engineering-experience.css'
       - 'apps/web/src/main.tsx'
       - '.github/workflows/product-control.yml'
   push:
@@ -46,6 +48,8 @@ on:
       - 'apps/web/src/module-delivery.css'
       - 'apps/web/src/unified-shell.css'
       - 'apps/web/src/unified-shell.ts'
+      - 'apps/web/src/inzozi-engineering-experience.ts'
+      - 'apps/web/src/inzozi-engineering-experience.css'
       - 'apps/web/src/main.tsx'
       - '.github/workflows/product-control.yml'
 
@@ -81,7 +85,8 @@ jobs:
           pytest -q \
             tests/test_product_planning.py \
             tests/test_product_postgres_integration.py \
-            tests/test_product_engineering_postgres_integration.py
+            tests/test_product_engineering_postgres_integration.py \
+            tests/test_product_repository_binding_postgres_integration.py
 
   product-web-build:
     runs-on: ubuntu-latest
@@ -93,7 +98,7 @@ jobs:
       - name: Install
         working-directory: apps/web
         run: npm install
-      - name: Verify Aquila Studio scrolling contract
+      - name: Verify Inzozi AI-Coding scrolling contract
         working-directory: apps/web
         run: |
           grep -Fq 'height: 100dvh;' src/studio-shell-refinement.css
@@ -142,6 +147,26 @@ jobs:
           grep -Fq 'One solution · synchronized delivery' src/InzoziSolutionSync.tsx
           grep -Fq 'height: 100dvh;' src/studio-engineering-sync.css
           grep -Fq 'min-height: 44px;' src/studio-engineering-sync.css
+      - name: Verify persistent repository and workspace binding experience
+        working-directory: apps/web
+        run: |
+          grep -Fq 'Connect engineering repository' src/inzozi-engineering-experience.ts
+          grep -Fq '/engineering/repositories' src/inzozi-engineering-experience.ts
+          grep -Fq '/repository' src/inzozi-engineering-experience.ts
+          grep -Fq 'module_override' src/inzozi-engineering-experience.ts
+          grep -Fq 'product_default' src/inzozi-engineering-experience.ts
+          grep -Fq 'recoverable-workspace-resume' src/inzozi-engineering-experience.ts
+          grep -Fq "import './inzozi-engineering-experience'" src/main.tsx
+          grep -Fq "import './inzozi-engineering-experience.css'" src/main.tsx
+          grep -Fq '.inzozi-engineering-binding-card' src/inzozi-engineering-experience.css
+      - name: Verify user-facing Inzozi terminology normalization
+        working-directory: apps/web
+        run: |
+          grep -Fq "replaceAll('@aquila', '@inzozi')" src/inzozi-engineering-experience.ts
+          grep -Fq "replaceAll('AQUILA', 'INZOZI')" src/inzozi-engineering-experience.ts
+          grep -Fq "replaceAll('Aquila', 'Inzozi')" src/inzozi-engineering-experience.ts
+          grep -Fq 'MutationObserver' src/inzozi-engineering-experience.ts
+          grep -Fq 'characterData: true' src/inzozi-engineering-experience.ts
       - name: Verify unified Inzozi AI-Coding shell contract
         working-directory: apps/web
         run: |
@@ -179,6 +204,6 @@ jobs:
             echo 'temporary IC auth mark must not return' >&2
             exit 1
           fi
-      - name: Build Aquila Studio product-control UI
+      - name: Build Inzozi AI-Coding product-control UI
         working-directory: apps/web
         run: npm run build
