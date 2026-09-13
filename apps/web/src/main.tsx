@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import AuthGate from './AuthGate'
+import InzoziSolutionSync from './InzoziSolutionSync'
 import StudioShell from './StudioShell'
 import './styles.css'
 import './project-policy.css'
@@ -11,11 +12,14 @@ import './auth.css'
 import './studio-shell.css'
 import './studio-shell-refinement.css'
 import './studio-live-review.css'
+import './studio-engineering-sync.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <AuthGate>
-      <StudioShell />
+      <InzoziSolutionSync>
+        <StudioShell />
+      </InzoziSolutionSync>
     </AuthGate>
   </React.StrictMode>,
 )

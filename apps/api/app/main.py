@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
+from app.product.engineering_sync import ensure_engineering_sync_schema
 from app.product.store import ensure_product_schema
 from app.routes.agent import router as agent_router
 from app.routes.auth import router as auth_router
@@ -11,6 +12,7 @@ from app.routes.git_pull_request import router as git_pull_request_router
 from app.routes.git_remote import router as git_remote_router
 from app.routes.github_app import router as github_app_router
 from app.routes.health import router as health_router
+from app.routes.product_engineering import router as product_engineering_router
 from app.routes.products import router as products_router
 from app.routes.workspace import router as workspace_router
 from app.security.auth import AuthMiddleware
@@ -35,10 +37,11 @@ async def lifespan(_: FastAPI):
             except AuthStateUnavailableError as exc:
                 raise RuntimeError("Authentication state service unavailable") from exc
             if settings.auth_identity_mode == "database":
-                # Multi-user staging treats both identity and Product Control as
-                # durable PostgreSQL state and fails closed if either cannot start.
+                # Multi-user staging treats identity, Product Control and the
+                # Product ↔ Engineering synchronization layer as durable state.
                 ensure_identity_schema()
                 ensure_product_schema()
+                ensure_engineering_sync_schema()
         if settings.workspace_ownership_enforced:
             # Fail closed in staging if durable ownership cannot be initialized.
             ensure_workspace_ownership_schema()
@@ -55,7 +58,8 @@ def create_app() -> FastAPI:
         version="0.2.0",
         description=(
             "Aquila Studio product planning plus guarded engineering runtime: "
-            "product control, AI routing, authentication, RBAC and ownership-scoped workspaces"
+            "product control, synchronized engineering evidence, AI routing, "
+            "authentication, RBAC and ownership-scoped workspaces"
         ),
         lifespan=lifespan,
     )
@@ -75,6 +79,7 @@ def create_app() -> FastAPI:
     application.include_router(health_router)
     application.include_router(auth_router)
     application.include_router(products_router)
+    application.include_router(product_engineering_router)
     application.include_router(agent_router)
     application.include_router(workspace_router)
     application.include_router(git_remote_router)
