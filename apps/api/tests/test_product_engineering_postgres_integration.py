@@ -9,6 +9,7 @@ import pytest
 from app.core.config import get_settings
 from app.main import create_app
 from app.product.engineering_sync import (
+    assign_deliverable_to_module,
     ensure_engineering_sync_schema,
     get_engineering_summary,
     record_engineering_event,
@@ -20,6 +21,7 @@ from app.product.store import (
     create_product,
     ensure_product_schema,
     get_product_snapshot,
+    update_deliverable_status,
 )
 from app.routes.products import ModuleSeedRequest, ProductCreateRequest, build_initial_product_plan
 
@@ -47,6 +49,7 @@ def _configure_database(monkeypatch):
             TRUNCATE
                 aquila_product_engineering_events,
                 aquila_product_engineering_bindings,
+                aquila_product_module_deliverables,
                 aquila_product_dependencies,
                 aquila_product_deliverables,
                 aquila_product_modules,
@@ -106,20 +109,51 @@ def test_engineering_sync_api_contract_is_exposed():
     assert "/v1/products/{product_id}/engineering" in paths
     assert "/v1/products/{product_id}/engineering/binding" in paths
     assert "/v1/products/{product_id}/engineering/events" in paths
+    assert "/v1/products/{product_id}/engineering/deliverables/{deliverable_id}/module" in paths
     assert "get" in paths["/v1/products/{product_id}/engineering"]
     assert "put" in paths["/v1/products/{product_id}/engineering/binding"]
     assert "post" in paths["/v1/products/{product_id}/engineering/events"]
+    assert "put" in paths["/v1/products/{product_id}/engineering/deliverables/{deliverable_id}/module"]
 
 
-def test_binding_and_engineering_evidence_update_real_progress_without_false_completion():
+def test_module_delivery_binding_and_progress_are_persistent_and_acceptance_driven():
     solution = _create_solution()
     engineering_module = next(item for item in solution["modules"] if item["name"] == "Engineering Space")
     planned_deliverable = next(item for item in solution["deliverables"] if item["status"] == "planned")
 
     initial = get_engineering_summary(product_id=solution["product_id"], organization_id="org-a")
     assert initial["binding"] is None
-    assert initial["evidence_count"] == 0
-    assert initial["sync_health"] == "not_linked"
+    assert initial["module_delivery_summary"]["linked_deliverables_total"] == 0
+    assert initial["module_proposals"]
+
+    with pytest.raises(ProductValidationError):
+        update_engineering_binding(
+            product_id=solution["product_id"],
+            organization_id="org-a",
+            changes={
+                "module_id": engineering_module["module_id"],
+                "deliverable_id": planned_deliverable["deliverable_id"],
+            },
+        )
+
+    assigned = assign_deliverable_to_module(
+        product_id=solution["product_id"],
+        organization_id="org-a",
+        deliverable_id=planned_deliverable["deliverable_id"],
+        module_id=engineering_module["module_id"],
+    )
+    delivery = next(
+        item for item in assigned["delivery_deliverables"]
+        if item["deliverable_id"] == planned_deliverable["deliverable_id"]
+    )
+    assert delivery["module_id"] == engineering_module["module_id"]
+    module_progress = next(
+        item for item in assigned["module_delivery"]
+        if item["module_id"] == engineering_module["module_id"]
+    )
+    assert module_progress["deliverable_total"] == 1
+    assert module_progress["deliverable_complete"] == 0
+    assert module_progress["progress_percent"] == 0
 
     bound = update_engineering_binding(
         product_id=solution["product_id"],
@@ -134,29 +168,8 @@ def test_binding_and_engineering_evidence_update_real_progress_without_false_com
     )
     assert bound["binding"]["module_name"] == "Engineering Space"
     assert bound["binding"]["deliverable_title"] == planned_deliverable["title"]
-    assert bound["sync_health"] == "ready"
 
-    active = record_engineering_event(
-        product_id=solution["product_id"],
-        organization_id="org-a",
-        event_type="workspace_opened",
-        status="success",
-        summary="Guarded engineering workspace opened.",
-        evidence={"workspace_id": "workspace-123"},
-    )
-    assert active["evidence_count"] == 1
-    assert active["sync_health"] == "active"
-
-    refreshed = get_product_snapshot(product_id=solution["product_id"], organization_id="org-a")
-    module = next(item for item in refreshed["modules"] if item["module_id"] == engineering_module["module_id"])
-    deliverable = next(
-        item for item in refreshed["deliverables"]
-        if item["deliverable_id"] == planned_deliverable["deliverable_id"]
-    )
-    assert module["status"] == "in_progress"
-    assert deliverable["status"] == "in_progress"
-
-    after_commit = record_engineering_event(
+    record_engineering_event(
         product_id=solution["product_id"],
         organization_id="org-a",
         event_type="commit_created",
@@ -164,7 +177,6 @@ def test_binding_and_engineering_evidence_update_real_progress_without_false_com
         summary="Reviewed local commit created.",
         evidence={"commit_sha": "abc123"},
     )
-    assert after_commit["evidence_count"] == 2
 
     refreshed = get_product_snapshot(product_id=solution["product_id"], organization_id="org-a")
     module = next(item for item in refreshed["modules"] if item["module_id"] == engineering_module["module_id"])
@@ -177,22 +189,76 @@ def test_binding_and_engineering_evidence_update_real_progress_without_false_com
     assert module["status"] != "complete"
     assert deliverable["status"] != "complete"
 
-    attention = record_engineering_event(
+    completed = update_deliverable_status(
+        product_id=solution["product_id"],
+        deliverable_id=planned_deliverable["deliverable_id"],
+        organization_id="org-a",
+        status="complete",
+    )
+    assert next(
+        item for item in completed["deliverables"]
+        if item["deliverable_id"] == planned_deliverable["deliverable_id"]
+    )["status"] == "complete"
+
+    final_summary = get_engineering_summary(product_id=solution["product_id"], organization_id="org-a")
+    module_progress = next(
+        item for item in final_summary["module_delivery"]
+        if item["module_id"] == engineering_module["module_id"]
+    )
+    assert module_progress["deliverable_complete"] == 1
+    assert module_progress["progress_percent"] == 100
+    assert module_progress["derived_status"] == "complete"
+    assert final_summary["module_delivery_summary"]["progress_percent"] == 100
+
+
+def test_module_delivery_reassignment_updates_engineering_context_and_can_be_cleared():
+    solution = _create_solution()
+    first_module, second_module = solution["modules"][:2]
+    deliverable = next(item for item in solution["deliverables"] if item["status"] == "planned")
+
+    assign_deliverable_to_module(
         product_id=solution["product_id"],
         organization_id="org-a",
-        event_type="command_completed",
-        status="failure",
-        summary="Test command failed.",
-        evidence={"action": "test", "exit_code": 1},
+        deliverable_id=deliverable["deliverable_id"],
+        module_id=first_module["module_id"],
     )
-    assert attention["sync_health"] == "attention"
-    assert attention["evidence_count"] == 3
+    update_engineering_binding(
+        product_id=solution["product_id"],
+        organization_id="org-a",
+        changes={
+            "module_id": first_module["module_id"],
+            "deliverable_id": deliverable["deliverable_id"],
+        },
+    )
+
+    moved = assign_deliverable_to_module(
+        product_id=solution["product_id"],
+        organization_id="org-a",
+        deliverable_id=deliverable["deliverable_id"],
+        module_id=second_module["module_id"],
+    )
+    assert moved["binding"]["module_id"] == second_module["module_id"]
+    assert moved["binding"]["deliverable_id"] == deliverable["deliverable_id"]
+
+    cleared = assign_deliverable_to_module(
+        product_id=solution["product_id"],
+        organization_id="org-a",
+        deliverable_id=deliverable["deliverable_id"],
+        module_id=None,
+    )
+    assert cleared["binding"]["deliverable_id"] is None
+    delivery = next(
+        item for item in cleared["delivery_deliverables"]
+        if item["deliverable_id"] == deliverable["deliverable_id"]
+    )
+    assert delivery["module_id"] is None
 
 
 def test_engineering_sync_is_organization_scoped_and_rejects_foreign_children():
     first = _create_solution(organization_id="org-a")
     second = _create_solution(organization_id="org-b")
     foreign_module = second["modules"][0]
+    first_deliverable = first["deliverables"][0]
 
     with pytest.raises(ProductNotFoundError):
         get_engineering_summary(product_id=first["product_id"], organization_id="org-b")
@@ -202,6 +268,14 @@ def test_engineering_sync_is_organization_scoped_and_rejects_foreign_children():
             product_id=first["product_id"],
             organization_id="org-a",
             changes={"module_id": foreign_module["module_id"]},
+        )
+
+    with pytest.raises(ProductValidationError):
+        assign_deliverable_to_module(
+            product_id=first["product_id"],
+            organization_id="org-a",
+            deliverable_id=first_deliverable["deliverable_id"],
+            module_id=foreign_module["module_id"],
         )
 
     with pytest.raises(ProductNotFoundError):
