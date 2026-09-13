@@ -51,10 +51,12 @@ function priorityLabel(value: ModulePriority) {
 }
 
 async function request(url: string, init: RequestInit) {
+  const headers = new Headers(init.headers)
+  headers.set('Content-Type', 'application/json')
   const response = await fetch(url, {
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
     ...init,
+    credentials: 'same-origin',
+    headers,
   })
   if (!response.ok) {
     let detail = `Request failed (${response.status})`
