@@ -1,0 +1,13 @@
+# Issue #39 monitor -> local Gotify adapter.
+#
+# Install as root:
+# /srv/inzozi-code/secrets/ops-alert.curl.conf
+#
+# Required mode: 0600.
+#
+# The Gotify application token is deliberately
+# NOT stored in this curl configuration.
+
+url = "http://127.0.0.1:8091/v1/alerts"
+request = "POST"
+noproxy = "*"
