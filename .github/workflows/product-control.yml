@@ -3,27 +3,35 @@ name: Product Control
 on:
   pull_request:
     paths:
+      - 'apps/api/app/main.py'
       - 'apps/api/app/product/**'
       - 'apps/api/app/routes/products.py'
+      - 'apps/api/app/routes/product_engineering.py'
       - 'apps/api/tests/test_product_*.py'
       - 'apps/web/src/StudioShell.tsx'
       - 'apps/web/src/SolutionModules.tsx'
+      - 'apps/web/src/InzoziSolutionSync.tsx'
       - 'apps/web/src/studio-shell.css'
       - 'apps/web/src/studio-shell-refinement.css'
       - 'apps/web/src/studio-live-review.css'
+      - 'apps/web/src/studio-engineering-sync.css'
       - 'apps/web/src/main.tsx'
       - '.github/workflows/product-control.yml'
   push:
     branches: [main]
     paths:
+      - 'apps/api/app/main.py'
       - 'apps/api/app/product/**'
       - 'apps/api/app/routes/products.py'
+      - 'apps/api/app/routes/product_engineering.py'
       - 'apps/api/tests/test_product_*.py'
       - 'apps/web/src/StudioShell.tsx'
       - 'apps/web/src/SolutionModules.tsx'
+      - 'apps/web/src/InzoziSolutionSync.tsx'
       - 'apps/web/src/studio-shell.css'
       - 'apps/web/src/studio-shell-refinement.css'
       - 'apps/web/src/studio-live-review.css'
+      - 'apps/web/src/studio-engineering-sync.css'
       - 'apps/web/src/main.tsx'
       - '.github/workflows/product-control.yml'
 
@@ -49,14 +57,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Test product planning and durable product state
+      - name: Test product planning, durable product state and engineering synchronization
         working-directory: apps/api
         env:
           RUN_POSTGRES_INTEGRATION: "1"
           DATABASE_URL: postgresql://inzozi_code:test-only@127.0.0.1:5432/inzozi_code
         run: |
           python -m pip install -e '.[dev]'
-          pytest -q tests/test_product_planning.py tests/test_product_postgres_integration.py
+          pytest -q \
+            tests/test_product_planning.py \
+            tests/test_product_postgres_integration.py \
+            tests/test_product_engineering_postgres_integration.py
 
   product-web-build:
     runs-on: ubuntu-latest
@@ -85,6 +96,21 @@ jobs:
           grep -Fq 'Pending' src/SolutionModules.tsx
           grep -Fq 'Closed' src/SolutionModules.tsx
           grep -Fq 'min-height: 44px;' src/studio-live-review.css
+      - name: Verify Inzozi AI-Coding Product ↔ Engineering synchronization contract
+        working-directory: apps/web
+        run: |
+          grep -Fq 'Inzozi AI-Coding' src/InzoziSolutionSync.tsx
+          grep -Fq 'Project Control Center' src/InzoziSolutionSync.tsx
+          grep -Fq 'Engineering Space' src/InzoziSolutionSync.tsx
+          grep -Fq 'workspace_opened' src/InzoziSolutionSync.tsx
+          grep -Fq 'command_completed' src/InzoziSolutionSync.tsx
+          grep -Fq 'git_review_prepared' src/InzoziSolutionSync.tsx
+          grep -Fq 'commit_created' src/InzoziSolutionSync.tsx
+          grep -Fq 'push_completed' src/InzoziSolutionSync.tsx
+          grep -Fq 'pull_request_created' src/InzoziSolutionSync.tsx
+          grep -Fq 'One solution · synchronized delivery' src/InzoziSolutionSync.tsx
+          grep -Fq 'height: 100dvh;' src/studio-engineering-sync.css
+          grep -Fq 'min-height: 44px;' src/studio-engineering-sync.css
       - name: Build Aquila Studio product-control UI
         working-directory: apps/web
         run: npm run build
