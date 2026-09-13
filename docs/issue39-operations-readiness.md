@@ -286,6 +286,8 @@ The Gotify application token is stored separately at:
 
 The token file must be owned by root with mode `0400` or `0600`.
 
+The adapter service intentionally keeps an empty Linux capability bounding set and an empty ambient capability set. On staging, `/srv/inzozi-code` is owned by the `inzozi` account/group and is mode `0750`, while the `secrets` directory and Gotify application token remain root-owned. The service therefore uses only `SupplementaryGroups=inzozi` so that its root process can traverse the protected parent directory without granting `CAP_DAC_READ_SEARCH`, `CAP_DAC_OVERRIDE`, or another broad DAC-bypass capability. This supplementary group does not grant access to the root-only `secrets` directory or token by group permissions; it only supplies the execute/search permission required on the parent path. Staging isolation probes confirmed that the zero-capability sandbox cannot reach the token without this group and can reach it with the group while Gotify loopback access and the `127.0.0.1:8091` bind remain functional.
+
 No Gotify password or token may be committed, echoed, placed in a URL, stored in the monitor curl configuration, printed to terminal evidence, or included in issue/PR output.
 
 ### Adapter contract

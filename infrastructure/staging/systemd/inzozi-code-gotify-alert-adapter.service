@@ -7,6 +7,7 @@ After=network-online.target docker.service
 Type=simple
 User=root
 Group=root
+SupplementaryGroups=inzozi
 UMask=0077
 Environment=PYTHONDONTWRITEBYTECODE=1
 

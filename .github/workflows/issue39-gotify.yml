@@ -292,22 +292,53 @@ jobs:
                   "CHECKOUT_ACTION_PIN=FAIL"
               )
 
+          unit_lines = {
+              line.strip()
+              for line in unit.splitlines()
+          }
+
           required_unit = (
               "User=root",
+              "Group=root",
+              "SupplementaryGroups=inzozi",
               "UMask=0077",
               "NoNewPrivileges=true",
               "ProtectSystem=strict",
               "CapabilityBoundingSet=",
+              "AmbientCapabilities=",
               "RestrictAddressFamilies=AF_INET AF_UNIX",
               "IPAddressDeny=any",
               "IPAddressAllow=127.0.0.0/8",
           )
 
           for item in required_unit:
-              if item not in unit:
+              if item not in unit_lines:
                   raise SystemExit(
                       "MISSING_SYSTEMD_CONTROL="
                       + item
+                  )
+
+          for line in unit_lines:
+              if (
+                  line.startswith(
+                      "CapabilityBoundingSet="
+                  )
+                  and line
+                  != "CapabilityBoundingSet="
+              ):
+                  raise SystemExit(
+                      "SYSTEMD_CAPABILITY_BOUNDING_SET_NOT_EMPTY"
+                  )
+
+              if (
+                  line.startswith(
+                      "AmbientCapabilities="
+                  )
+                  and line
+                  != "AmbientCapabilities="
+              ):
+                  raise SystemExit(
+                      "SYSTEMD_AMBIENT_CAPABILITIES_NOT_EMPTY"
                   )
 
           trap_index = adapter_installer.index(
