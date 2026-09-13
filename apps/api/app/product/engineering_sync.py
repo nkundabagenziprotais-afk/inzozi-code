@@ -107,6 +107,30 @@ def ensure_engineering_sync_schema() -> None:
             ON aquila_product_engineering_events (product_id, created_at DESC)
             """
         )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS aquila_product_module_deliverables (
+                assignment_id UUID PRIMARY KEY,
+                product_id UUID NOT NULL
+                    REFERENCES aquila_products(product_id) ON DELETE CASCADE,
+                module_id UUID NOT NULL
+                    REFERENCES aquila_product_modules(module_id) ON DELETE CASCADE,
+                deliverable_id UUID NOT NULL
+                    REFERENCES aquila_product_deliverables(deliverable_id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT aquila_module_deliverable_unique
+                    UNIQUE (product_id, deliverable_id),
+                CONSTRAINT aquila_module_deliverable_pair_unique
+                    UNIQUE (product_id, module_id, deliverable_id)
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS aquila_module_deliverables_module_idx
+            ON aquila_product_module_deliverables (product_id, module_id, created_at)
+            """
+        )
 
 
 def _serialize(value: Any) -> Any:
@@ -149,6 +173,130 @@ def _assert_child_belongs_to_product(
         raise ProductValidationError(f"{label} does not belong to this product")
 
 
+def _module_proposals(cursor, *, product_id: str) -> list[dict[str, str]]:
+    """Return review-only starting modules; nothing is persisted until explicitly added."""
+
+    cursor.execute(
+        """
+        SELECT p.name, b.concept, b.capabilities
+        FROM aquila_products p
+        LEFT JOIN aquila_product_blueprints b ON b.product_id = p.product_id
+        WHERE p.product_id = %s
+        """,
+        (product_id,),
+    )
+    product = cursor.fetchone() or {}
+    text = f"{product.get('name') or ''} {product.get('concept') or ''}".casefold()
+    capabilities = set(product.get("capabilities") or [])
+
+    if any(token in text for token in ("school", "student", "education", "academic")):
+        proposals = [
+            ("Admissions & Enrollment", "Manage applications, admissions, enrollment and student intake.", "must_have"),
+            ("Student Management", "Maintain student profiles, guardians, classes and lifecycle records.", "must_have"),
+            ("Academic Management", "Manage subjects, classes, assessments, grades and academic progression.", "must_have"),
+            ("Fees & Finance", "Manage fee structures, billing, collections, balances and finance controls.", "must_have"),
+            ("Attendance", "Track student and staff attendance with follow-up workflows.", "should_have"),
+            ("Parent / Student Portal", "Provide self-service access to results, balances, notices and requests.", "should_have"),
+            ("Reporting & Analytics", "Provide operational and management reporting across the school.", "good_to_have"),
+        ]
+    elif any(token in text for token in ("farm", "agri", "crop", "livestock", "farmer")):
+        proposals = [
+            ("Farm & Plot Registry", "Maintain farms, plots, locations, ownership and production units.", "must_have"),
+            ("Farmer / Owner Management", "Maintain farmer, owner, worker and stakeholder profiles.", "must_have"),
+            ("Production Management", "Plan and track crop, livestock or production cycles and outputs.", "must_have"),
+            ("Inputs & Inventory", "Manage inputs, stock, equipment and consumption records.", "must_have"),
+            ("Field Activities", "Plan, assign and track field work and operational tasks.", "should_have"),
+            ("Harvest, Sales & Market", "Track harvests, sales, customers, pricing and market transactions.", "should_have"),
+            ("Reporting & Analytics", "Provide farm performance, production and management insights.", "good_to_have"),
+        ]
+    else:
+        proposals = [
+            ("Core Records & Profiles", "Maintain the core business records and profiles used by the solution.", "must_have"),
+            ("Workflow & Operations", "Manage the main operational workflow from initiation through completion.", "must_have"),
+            ("Administration & Access", "Manage configuration, roles, permissions and administrative controls.", "must_have"),
+            ("Reporting & Analytics", "Provide operational and management reports and dashboards.", "should_have"),
+            ("Notifications & Communication", "Support alerts, reminders and user communication.", "should_have"),
+        ]
+        if "external_integrations" in capabilities:
+            proposals.append(
+                ("External Integrations", "Coordinate partner and third-party service integrations.", "good_to_have")
+            )
+
+    cursor.execute(
+        "SELECT LOWER(name) AS name FROM aquila_product_modules WHERE product_id = %s",
+        (product_id,),
+    )
+    existing = {row["name"] for row in cursor.fetchall()}
+    return [
+        {
+            "name": name,
+            "description": description,
+            "priority": priority,
+            "proposal_state": "review_only",
+        }
+        for name, description, priority in proposals
+        if name.casefold() not in existing
+    ]
+
+
+def _read_module_delivery(cursor, *, product_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    cursor.execute(
+        """
+        SELECT m.module_id, m.sequence, m.name, m.priority, m.status,
+               COUNT(md.deliverable_id)::int AS deliverable_total,
+               COUNT(md.deliverable_id) FILTER (WHERE d.status = 'complete')::int AS deliverable_complete,
+               COUNT(md.deliverable_id) FILTER (WHERE d.status = 'blocked')::int AS deliverable_blocked,
+               COUNT(md.deliverable_id) FILTER (WHERE d.status = 'in_progress')::int AS deliverable_in_progress
+        FROM aquila_product_modules m
+        LEFT JOIN aquila_product_module_deliverables md
+          ON md.product_id = m.product_id AND md.module_id = m.module_id
+        LEFT JOIN aquila_product_deliverables d
+          ON d.product_id = md.product_id AND d.deliverable_id = md.deliverable_id
+        WHERE m.product_id = %s
+        GROUP BY m.module_id, m.sequence, m.name, m.priority, m.status
+        ORDER BY m.sequence, m.created_at
+        """,
+        (product_id,),
+    )
+    modules = []
+    for row in cursor.fetchall():
+        item = _serialize_row(row)
+        total = int(item["deliverable_total"])
+        complete = int(item["deliverable_complete"])
+        blocked = int(item["deliverable_blocked"])
+        in_progress = int(item["deliverable_in_progress"])
+        item["progress_percent"] = round((complete / total) * 100) if total else (
+            100 if item["status"] == "complete" else 0
+        )
+        if total:
+            item["derived_status"] = (
+                "complete" if complete == total
+                else "blocked" if blocked
+                else "in_progress" if in_progress or complete
+                else "planned"
+            )
+        else:
+            item["derived_status"] = item["status"]
+        modules.append(item)
+
+    cursor.execute(
+        """
+        SELECT d.deliverable_id, d.sequence, d.title, d.description, d.status,
+               md.module_id, m.name AS module_name
+        FROM aquila_product_deliverables d
+        LEFT JOIN aquila_product_module_deliverables md
+          ON md.product_id = d.product_id AND md.deliverable_id = d.deliverable_id
+        LEFT JOIN aquila_product_modules m
+          ON m.product_id = md.product_id AND m.module_id = md.module_id
+        WHERE d.product_id = %s
+        ORDER BY d.sequence
+        """,
+        (product_id,),
+    )
+    deliverables = [_serialize_row(row) for row in cursor.fetchall()]
+    return modules, deliverables
+
+
 def _read_summary(cursor, *, product_id: str) -> dict[str, Any]:
     cursor.execute(
         """
@@ -188,6 +336,12 @@ def _read_summary(cursor, *, product_id: str) -> dict[str, Any]:
     )
     evidence_count = int(cursor.fetchone()["total"])
 
+    module_delivery, delivery_deliverables = _read_module_delivery(cursor, product_id=product_id)
+    linked_total = sum(int(item["deliverable_total"]) for item in module_delivery)
+    linked_complete = sum(int(item["deliverable_complete"]) for item in module_delivery)
+    linked_blocked = sum(int(item["deliverable_blocked"]) for item in module_delivery)
+    modules_complete = sum(1 for item in module_delivery if item["derived_status"] == "complete")
+
     serialized_binding = _serialize_row(binding) if binding else None
     serialized_events = [_serialize_row(row) for row in events]
     last_activity_at = serialized_events[0]["created_at"] if serialized_events else (
@@ -200,6 +354,17 @@ def _read_summary(cursor, *, product_id: str) -> dict[str, Any]:
         "evidence_count": evidence_count,
         "last_activity_at": last_activity_at,
         "sync_health": serialized_binding["sync_status"] if serialized_binding else "not_linked",
+        "module_delivery": module_delivery,
+        "delivery_deliverables": delivery_deliverables,
+        "module_delivery_summary": {
+            "modules_total": len(module_delivery),
+            "modules_complete": modules_complete,
+            "linked_deliverables_total": linked_total,
+            "linked_deliverables_complete": linked_complete,
+            "linked_deliverables_blocked": linked_blocked,
+            "progress_percent": round((linked_complete / linked_total) * 100) if linked_total else 0,
+        },
+        "module_proposals": _module_proposals(cursor, product_id=product_id),
     }
 
 
@@ -215,6 +380,115 @@ def get_engineering_summary(*, product_id: str, organization_id: str) -> dict[st
         raise
     except Exception as exc:  # noqa: BLE001
         raise EngineeringSyncError("Unable to read engineering synchronization") from exc
+
+
+def assign_deliverable_to_module(
+    *,
+    product_id: str,
+    organization_id: str,
+    deliverable_id: str,
+    module_id: str | None,
+) -> dict[str, Any]:
+    """Attach one deliverable to one intended module, or clear the assignment."""
+
+    ensure_engineering_sync_schema()
+    try:
+        with _connect(autocommit=False) as connection, connection.cursor() as cursor:
+            _assert_product_access(cursor, product_id=product_id, organization_id=organization_id)
+            _assert_child_belongs_to_product(
+                cursor,
+                product_id=product_id,
+                child_id=deliverable_id,
+                table="aquila_product_deliverables",
+                id_column="deliverable_id",
+                label="Deliverable",
+            )
+            _assert_child_belongs_to_product(
+                cursor,
+                product_id=product_id,
+                child_id=module_id,
+                table="aquila_product_modules",
+                id_column="module_id",
+                label="Module",
+            )
+
+            if module_id is None:
+                cursor.execute(
+                    """
+                    DELETE FROM aquila_product_module_deliverables
+                    WHERE product_id = %s AND deliverable_id = %s
+                    """,
+                    (product_id, deliverable_id),
+                )
+                cursor.execute(
+                    """
+                    UPDATE aquila_product_engineering_bindings
+                    SET deliverable_id = NULL, updated_at = NOW()
+                    WHERE product_id = %s AND deliverable_id = %s
+                    """,
+                    (product_id, deliverable_id),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO aquila_product_module_deliverables (
+                        assignment_id, product_id, module_id, deliverable_id
+                    ) VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (product_id, deliverable_id)
+                    DO UPDATE SET module_id = EXCLUDED.module_id
+                    """,
+                    (str(uuid4()), product_id, module_id, deliverable_id),
+                )
+                cursor.execute(
+                    """
+                    UPDATE aquila_product_engineering_bindings
+                    SET module_id = %s, updated_at = NOW()
+                    WHERE product_id = %s AND deliverable_id = %s
+                    """,
+                    (module_id, product_id, deliverable_id),
+                )
+
+            cursor.execute(
+                "UPDATE aquila_products SET updated_at = NOW() WHERE product_id = %s",
+                (product_id,),
+            )
+            connection.commit()
+            return _read_summary(cursor, product_id=product_id)
+    except (ProductNotFoundError, ProductValidationError):
+        raise
+    except ProductStoreError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise EngineeringSyncError("Unable to assign deliverable to module") from exc
+
+
+def _resolve_module_for_deliverable(
+    cursor,
+    *,
+    product_id: str,
+    module_id: str | None,
+    deliverable_id: str | None,
+) -> str | None:
+    if deliverable_id is None:
+        return module_id
+
+    cursor.execute(
+        """
+        SELECT module_id
+        FROM aquila_product_module_deliverables
+        WHERE product_id = %s AND deliverable_id = %s
+        """,
+        (product_id, deliverable_id),
+    )
+    assignment = cursor.fetchone()
+    if not assignment:
+        raise ProductValidationError(
+            "Assign this deliverable to an intended module before continuing in Engineering Space"
+        )
+    assigned_module_id = str(assignment["module_id"])
+    if module_id is not None and str(module_id) != assigned_module_id:
+        raise ProductValidationError("Deliverable is assigned to a different intended module")
+    return assigned_module_id
 
 
 def update_engineering_binding(
@@ -277,6 +551,12 @@ def update_engineering_binding(
                 table="aquila_product_deliverables",
                 id_column="deliverable_id",
                 label="Deliverable",
+            )
+            module_id = _resolve_module_for_deliverable(
+                cursor,
+                product_id=product_id,
+                module_id=str(module_id) if module_id is not None else None,
+                deliverable_id=str(deliverable_id) if deliverable_id is not None else None,
             )
 
             if existing:
