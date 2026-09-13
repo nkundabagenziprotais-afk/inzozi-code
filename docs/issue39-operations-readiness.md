@@ -249,3 +249,83 @@ Delete/rebuild protection should be represented in reviewed Terraform before pub
 - no direct database manipulation to bypass application controls;
 - no automatic merge;
 - do not touch unrelated PRs or production infrastructure.
+
+## Interim self-hosted Gotify alert delivery
+
+Private staging uses self-hosted Gotify as an interim Issue #39 operator alert sink before the monitoring timers are activated.
+
+This design does not authorize public DNS, a new public port, firewall widening, production deployment, Terraform apply, provider-protection changes, or automatic merge.
+
+### Network boundary
+
+Gotify is exposed only through `127.0.0.1:8088` on the staging host.
+
+The Inzozi Code alert adapter listens only on `127.0.0.1:8091`.
+
+Neither endpoint may bind to `0.0.0.0`, `::`, the server's public interface, or a public hostname.
+
+Operator access to the Gotify WebUI uses an SSH local-forward tunnel. Direct mobile/Android connectivity is not enabled by this interim design.
+
+### Image and secret handling
+
+Gotify server version `3.1.0` must be deployed using an immutable reference:
+
+`gotify/server:3.1.0@sha256:<verified-digest>`
+
+The deployment installer rejects a floating or digestless image reference.
+
+Plugin loading is explicitly disabled for this staging Gotify instance. Container logs are bounded with per-service `json-file` rotation so this alerting addition does not depend on later daemon-wide Docker log settings.
+
+The initial administrator password is provided from a root-only host file through `GOTIFY_DEFAULTUSER_PASS_FILE`.
+
+The Gotify application token is stored separately at:
+
+`/srv/inzozi-code/secrets/gotify-app-token`
+
+The token file must be owned by root with mode `0400` or `0600`.
+
+No Gotify password or token may be committed, echoed, placed in a URL, stored in the monitor curl configuration, printed to terminal evidence, or included in issue/PR output.
+
+### Adapter contract
+
+The existing Issue #39 monitor sends sanitized JSON containing exactly:
+
+- `service`;
+- `severity`;
+- `summary`;
+- `timestamp`.
+
+The adapter accepts only this schema at `/v1/alerts`, restricts the expected service and severity values, rejects additional fields, and restricts the summary to sanitized operational marker characters.
+
+It converts the accepted payload into Gotify `/message` format and authenticates to Gotify with the root-only application token.
+
+Both monitor-to-adapter and adapter-to-Gotify loopback requests explicitly bypass environment proxy settings so alert payloads and the Gotify application token cannot be forwarded to a configured HTTP proxy.
+
+The adapter installer arms failure containment before its first host mutation, starts and proves the localhost service before enabling it, and installs the monitor alert configuration last. On a failed first-time installation it rolls back only the exact adapter executable, systemd unit, enablement, service state, and alert configuration paths that were proven absent before the run.
+
+### Controlled activation sequence
+
+After PR review, CI success, explicit merge, and deployment of the exact merged SHA:
+
+1. verify staging is clean and Issue #39 timers remain inactive;
+2. resolve and verify the immutable digest for `gotify/server:3.1.0`;
+3. create root-only Gotify configuration and administrator password files;
+4. run the guarded Gotify server installer;
+5. access `127.0.0.1:8088` through an SSH tunnel;
+6. create the `Inzozi Code Operations` Gotify application;
+7. store its application token in the root-only token file;
+8. run the guarded alert-adapter installer;
+9. prove one synthetic sanitized warning is delivered;
+10. run the normal Issue #39 monitor;
+11. verify alert/no-alert behavior;
+12. separately authorize timer activation.
+
+The Gotify installers do not activate the Issue #39 timers.
+
+### Same-host limitation
+
+Gotify and the monitored application currently share the same Hetzner staging server.
+
+Therefore, this interim path cannot notify the operator when the entire host, provider network path, or host networking stack is unavailable.
+
+This limitation is acceptable only for private staging. Production alert delivery should be off-host.

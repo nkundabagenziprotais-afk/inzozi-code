@@ -1,0 +1,373 @@
+name: Issue 39 Gotify Alerting
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/issue39-gotify.yml'
+      - 'docs/issue39-operations-readiness.md'
+      - 'infrastructure/staging/docker-compose.gotify.yml'
+      - 'infrastructure/staging/gotify_alert_adapter.py'
+      - 'infrastructure/staging/test_gotify_alert_adapter.py'
+      - 'infrastructure/staging/gotify.env.example'
+      - 'infrastructure/staging/ops-alert.curl.conf.gotify.example'
+      - 'infrastructure/staging/install-gotify-server.sh'
+      - 'infrastructure/staging/install-gotify-alert-adapter.sh'
+      - 'infrastructure/staging/systemd/inzozi-code-gotify-alert-adapter.service'
+      - 'infrastructure/staging/monitor-operations.sh'
+
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/issue39-gotify.yml'
+      - 'docs/issue39-operations-readiness.md'
+      - 'infrastructure/staging/**'
+
+jobs:
+  gotify-alerting-static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Validate shell syntax
+        run: |
+          bash -n infrastructure/staging/install-gotify-server.sh
+          bash -n infrastructure/staging/install-gotify-alert-adapter.sh
+
+      - name: Validate Gotify compose syntax
+        env:
+          GOTIFY_IMAGE: gotify/server:3.1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          GOTIFY_DATA_DIR: /tmp/gotify-data
+          GOTIFY_ADMIN_PASSWORD_FILE_HOST: /tmp/gotify-admin-password
+        run: |
+          docker compose \
+            -f infrastructure/staging/docker-compose.gotify.yml \
+            config \
+            >/dev/null
+
+      - name: Validate adapter systemd unit
+        run: |
+          tmp_dir="$(mktemp -d)"
+          trap 'rm -rf "$tmp_dir"' EXIT
+          tmp_unit="$tmp_dir/inzozi-code-gotify-alert-adapter.service"
+
+          sed \
+            's#^ExecStart=.*#ExecStart=/usr/bin/true#' \
+            infrastructure/staging/systemd/inzozi-code-gotify-alert-adapter.service \
+            >"$tmp_unit"
+
+          systemd-analyze verify \
+            "$tmp_unit" \
+            >/dev/null
+
+      - name: Validate Python syntax
+        run: |
+          python3 -m py_compile \
+            infrastructure/staging/gotify_alert_adapter.py \
+            infrastructure/staging/test_gotify_alert_adapter.py
+
+      - name: Run adapter unit tests
+        working-directory: infrastructure/staging
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 test_gotify_alert_adapter.py
+
+      - name: Validate safety invariants
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path(
+              "infrastructure/staging"
+          )
+
+          compose = (
+              root
+              / "docker-compose.gotify.yml"
+          ).read_text()
+
+          adapter = (
+              root
+              / "gotify_alert_adapter.py"
+          ).read_text()
+
+          server_installer = (
+              root
+              / "install-gotify-server.sh"
+          ).read_text()
+
+          adapter_installer = (
+              root
+              / "install-gotify-alert-adapter.sh"
+          ).read_text()
+
+          curl_config = (
+              root
+              / "ops-alert.curl.conf.gotify.example"
+          ).read_text()
+
+          unit = (
+              root
+              / "systemd"
+              / "inzozi-code-gotify-alert-adapter.service"
+          ).read_text()
+
+          monitor = (
+              root
+              / "monitor-operations.sh"
+          ).read_text()
+
+          workflow = Path(
+              ".github/workflows/issue39-gotify.yml"
+          ).read_text()
+
+          required_compose = (
+              "127.0.0.1:8088:8080",
+              "GOTIFY_DEFAULTUSER_PASS_FILE",
+              'GOTIFY_PLUGINSDIR: ""',
+              "read_only: true",
+              "cap_drop:",
+              "no-new-privileges:true",
+              "internal: true",
+              "logging:",
+              'max-size: "10m"',
+              'max-file: "3"',
+          )
+
+          for item in required_compose:
+              if item not in compose:
+                  raise SystemExit(
+                      "MISSING_COMPOSE_CONTROL="
+                      + item
+                  )
+
+          if "gotify/server:latest" in compose:
+              raise SystemExit(
+                  "FLOATING_GOTIFY_IMAGE"
+              )
+
+          required_adapter = (
+              'LISTEN_HOST = "127.0.0.1"',
+              "LISTEN_PORT = 8091",
+              'GOTIFY_BASE_URL = "http://127.0.0.1:8088"',
+              '"X-Gotify-Key": token',
+              "urllib.request.ProxyHandler({})",
+              "EXPECTED_KEYS",
+              "SUMMARY_PATTERN",
+              "GOTIFY_ALERT_DELIVERY=PASS",
+              "ADAPTER_SECRET_VALUES_PRINTED=NO",
+          )
+
+          for item in required_adapter:
+              if item not in adapter:
+                  raise SystemExit(
+                      "MISSING_ADAPTER_CONTROL="
+                      + item
+                  )
+
+          required_server = (
+              "EXPECTED_COMMIT_SHA",
+              "CONFIRM_GOTIFY_SERVER_INSTALL",
+              r"gotify/server:3\.1\.0@sha256:",
+              "STAGING_ENV_MODE=PASS",
+              "GOTIFY_LOOPBACK_PORT_BINDING=PASS",
+              "GOTIFY_RUNTIME_VERSION_CHECK=PASS",
+              "GOTIFY_FAILURE_CONTAINMENT_ARMED=NO",
+              "ISSUE39_TIMERS_ACTIVE_AFTER=NO",
+          )
+
+          for item in required_server:
+              if item not in server_installer:
+                  raise SystemExit(
+                      "MISSING_SERVER_INSTALL_CONTROL="
+                      + item
+                  )
+
+          required_adapter_install = (
+              "EXPECTED_COMMIT_SHA",
+              "CONFIRM_GOTIFY_ADAPTER_INSTALL",
+              "GOTIFY_APP_TOKEN_PRIVATE=PASS",
+              "PYTHON_RUNTIME_COMPATIBLE=PASS",
+              "GOTIFY_ADAPTER_DESTINATIONS_AVAILABLE=PASS",
+              "GOTIFY_ADAPTER_FAILURE_CONTAINMENT_ARMED=PASS",
+              "GOTIFY_ADAPTER_SYSTEMD_VERIFY=PASS",
+              "GOTIFY_ADAPTER_RUNTIME_PROOF=PASS",
+              "GOTIFY_ADAPTER_BOOT_PERSISTENCE=PASS",
+              "OPS_ALERT_CONFIG_ROOT_PRIVATE=PASS",
+              "GOTIFY_ADAPTER_ROLLBACK_SCOPE=EXACT_NEW_DESTINATIONS_ONLY",
+              "SYNTHETIC_ALERT_SENT=NO",
+          )
+
+          for item in required_adapter_install:
+              if item not in adapter_installer:
+                  raise SystemExit(
+                      "MISSING_ADAPTER_INSTALL_CONTROL="
+                      + item
+                  )
+
+          if (
+              'url = "http://127.0.0.1:8091/v1/alerts"'
+              not in curl_config
+              or 'noproxy = "*"' not in curl_config
+          ):
+              raise SystemExit(
+                  "ALERT_CONFIG_NOT_STRICT_LOOPBACK"
+              )
+
+          required_monitor = (
+              '"service": "inzozi-code-staging"',
+              '"severity": severity',
+              '"summary": summary',
+              '"timestamp": datetime.now(timezone.utc).isoformat()',
+              'SUMMARY="$(IFS=,;',
+              ';WARN:',
+          )
+
+          for item in required_monitor:
+              if item not in monitor:
+                  raise SystemExit(
+                      "MONITOR_ADAPTER_CONTRACT_MISSING="
+                      + item
+                  )
+
+          workflow_lines = {
+              line.strip()
+              for line in workflow.splitlines()
+          }
+
+          required_workflow_lines = (
+              "permissions:",
+              "contents: read",
+              "timeout-minutes: 10",
+              "persist-credentials: false",
+              "- 'infrastructure/staging/monitor-operations.sh'",
+          )
+
+          for item in required_workflow_lines:
+              if item not in workflow_lines:
+                  raise SystemExit(
+                      "WORKFLOW_HARDENING_MISSING="
+                      + item
+                  )
+
+          checkout_refs = []
+
+          for line in workflow.splitlines():
+              stripped = line.strip()
+
+              if not stripped.startswith(
+                  "- uses: actions/checkout@"
+              ):
+                  continue
+
+              checkout_refs.append(
+                  stripped
+                  .split(
+                      "actions/checkout@",
+                      1,
+                  )[1]
+                  .split(
+                      None,
+                      1,
+                  )[0]
+              )
+
+          if checkout_refs != [
+              "11d5960a326750d5838078e36cf38b85af677262"
+          ]:
+              raise SystemExit(
+                  "CHECKOUT_ACTION_PIN=FAIL"
+              )
+
+          required_unit = (
+              "User=root",
+              "UMask=0077",
+              "NoNewPrivileges=true",
+              "ProtectSystem=strict",
+              "CapabilityBoundingSet=",
+              "RestrictAddressFamilies=AF_INET AF_UNIX",
+              "IPAddressDeny=any",
+              "IPAddressAllow=127.0.0.0/8",
+          )
+
+          for item in required_unit:
+              if item not in unit:
+                  raise SystemExit(
+                      "MISSING_SYSTEMD_CONTROL="
+                      + item
+                  )
+
+          trap_index = adapter_installer.index(
+              "trap contain_failed_adapter_install EXIT"
+          )
+          destination_arm_index = adapter_installer.index(
+              "ADAPTER_DESTINATION_ARMED='YES'"
+          )
+          executable_installed_index = adapter_installer.index(
+              "GOTIFY_ADAPTER_EXECUTABLE_INSTALLED=PASS"
+          )
+          start_index = adapter_installer.index(
+              "systemctl start"
+          )
+          proof_index = adapter_installer.index(
+              "GOTIFY_ADAPTER_RUNTIME_PROOF=PASS"
+          )
+          enable_index = adapter_installer.index(
+              "systemctl enable"
+          )
+          config_index = adapter_installer.index(
+              "ALERT_CONFIG_CREATED='YES'"
+          )
+
+          if not (
+              trap_index
+              < destination_arm_index
+              < executable_installed_index
+              < start_index
+              < proof_index
+              < enable_index
+              < config_index
+          ):
+              raise SystemExit(
+                  "ADAPTER_INSTALL_ORDER=FAIL"
+              )
+
+          combined = "\n".join(
+              (
+                  compose,
+                  adapter,
+                  server_installer,
+                  adapter_installer,
+                  curl_config,
+                  unit,
+                  monitor,
+              )
+          )
+
+          forbidden = (
+              "0.0.0.0:8088",
+              "0.0.0.0:8091",
+              "GOTIFY_DEFAULTUSER_PASS=admin",
+              "git reset --hard",
+              "chmod 777",
+          )
+
+          for item in forbidden:
+              if item in combined:
+                  raise SystemExit(
+                      "FORBIDDEN_PATTERN="
+                      + item
+                  )
+
+          print(
+              "ISSUE39_GOTIFY_SAFETY_INVARIANTS=PASS"
+          )
+          PY
