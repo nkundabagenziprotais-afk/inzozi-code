@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import App from './App'
+import SolutionModules, { ModuleProgress, ProductModule } from './SolutionModules'
 
 type StudioView = 'products' | 'engineering'
 type WorkStatus = 'planned' | 'in_progress' | 'blocked' | 'complete'
@@ -56,6 +57,8 @@ type Dependency = {
 type ProductSnapshot = ProductSummary & {
   blueprint: Blueprint
   components: ProductComponent[]
+  modules?: ProductModule[]
+  module_progress?: ModuleProgress
   deliverables: Deliverable[]
   dependencies: Dependency[]
 }
@@ -303,7 +306,7 @@ function ProductCreatePanel({
         <div className="studio-create-actions">
           <div>
             <strong>Aquila will create:</strong>
-            <span>Blueprint · System components · Delivery sequence · Initial dependency map</span>
+            <span>Blueprint · Module roadmap · System components · Delivery sequence · Initial dependency map</span>
           </div>
           <button
             className="studio-primary"
@@ -322,12 +325,14 @@ function ProjectControlCenter({
   canEdit,
   savingDeliverableId,
   onStatusChange,
+  onModulesChanged,
   onOpenEngineering,
 }: {
   product: ProductSnapshot
   canEdit: boolean
   savingDeliverableId: string | null
   onStatusChange: (deliverable: Deliverable, status: WorkStatus) => Promise<void>
+  onModulesChanged: () => Promise<void>
   onOpenEngineering: () => void
 }) {
   const grouped = useMemo(() => {
@@ -399,6 +404,14 @@ function ProjectControlCenter({
         <div><strong>Delivery progress</strong><span>{product.progress_percent}%</span></div>
         <div className="studio-progress-track"><span style={{ width: `${product.progress_percent}%` }} /></div>
       </section>
+
+      <SolutionModules
+        productId={product.product_id}
+        modules={product.modules ?? []}
+        progress={product.module_progress}
+        canEdit={canEdit}
+        onChanged={onModulesChanged}
+      />
 
       <div className="studio-control-grid">
         <section className="studio-card studio-roadmap">
@@ -546,6 +559,19 @@ export default function StudioShell() {
     setCreating(false)
   }
 
+  async function refreshSelectedProduct() {
+    if (!selected) return
+    try {
+      const refreshed = await api<ProductSnapshot>(`/api/v1/products/${selected.product_id}`)
+      setSelected(refreshed)
+      setProducts((current) => current.map((item) => (
+        item.product_id === refreshed.product_id ? refreshed : item
+      )))
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to refresh product.')
+    }
+  }
+
   async function updateStatus(deliverable: Deliverable, status: WorkStatus) {
     if (!selected || deliverable.status === status || savingDeliverableId) return
     setMessage('')
@@ -634,6 +660,7 @@ export default function StudioShell() {
               canEdit={canEdit}
               savingDeliverableId={savingDeliverableId}
               onStatusChange={updateStatus}
+              onModulesChanged={refreshSelectedProduct}
               onOpenEngineering={() => setView('engineering')}
             />
           ) : (
