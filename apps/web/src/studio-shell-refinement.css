@@ -2,6 +2,45 @@
    Loaded after studio-shell.css so this file can improve hierarchy and
    responsive behavior without rewriting the accepted Product Control shell. */
 
+/*
+ * Studio owns its scrolling instead of relying on the document body.
+ * The Engineering Workspace intentionally keeps the legacy fixed body layout,
+ * so bounding Studio to the viewport restores scrolling without changing the
+ * lower-level engineering runtime.
+ */
+.studio-shell {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+.studio-layout {
+  height: calc(100vh - 68px);
+  height: calc(100dvh - 68px);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.studio-sidebar {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.studio-main {
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
 .studio-topbar nav button:nth-child(2) {
   color: #7f8ba5;
   font-size: 11px;
@@ -124,6 +163,11 @@
 
 @media (max-width: 760px) {
   .studio-shell {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow: hidden;
     padding-bottom: env(safe-area-inset-bottom);
   }
 
@@ -171,17 +215,28 @@
     font-size: 14px;
   }
 
+  /* On mobile the layout itself is the single vertical scroll container.
+     This prevents nested-scroll traps while allowing the product switcher
+     below to keep its independent horizontal swipe behavior. */
   .studio-layout {
     display: block;
-    min-height: calc(100vh - 58px);
+    height: calc(100vh - 58px);
+    height: calc(100dvh - 58px);
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scrollbar-gutter: stable;
+    -webkit-overflow-scrolling: touch;
   }
 
   /* Mobile product navigation becomes a compact horizontal workspace switcher
      instead of a desktop sidebar stacked above the whole screen. */
   .studio-sidebar {
     position: sticky;
-    top: 58px;
+    top: 0;
     z-index: 24;
+    min-height: auto;
     max-height: none;
     overflow: hidden;
     border-right: 0;
@@ -224,7 +279,9 @@
     padding: 1px 1px 4px;
     scroll-snap-type: x proximity;
     overscroll-behavior-inline: contain;
+    touch-action: pan-x;
     scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
   }
 
   .studio-product-list::-webkit-scrollbar {
@@ -268,7 +325,9 @@
   }
 
   .studio-main {
-    padding: 14px 12px 20px;
+    height: auto;
+    min-height: 0;
+    padding: 14px 12px calc(20px + env(safe-area-inset-bottom));
     overflow: visible;
   }
 
