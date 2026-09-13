@@ -1,1 +1,1 @@
-"""Aquila Product Control persistence layer."""
+"""Aquila Studio product-control domain."""
