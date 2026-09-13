@@ -9,6 +9,7 @@ import './pull-request.css'
 import './repository-history.css'
 import './auth.css'
 import './studio-shell.css'
+import './studio-shell-refinement.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
