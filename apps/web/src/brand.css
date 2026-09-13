@@ -1,0 +1,101 @@
+/*
+ * Official Inzozi AI Solution visual identity.
+ *
+ * Use the compact mark in dense application chrome and the full lockup only
+ * where the interface has enough room to preserve the approved artwork.
+ */
+
+:root {
+  --inzozi-brand-blue: #0754bd;
+  --inzozi-brand-navy: #073a82;
+  --inzozi-brand-cyan: #19c7c3;
+}
+
+/* Common Inzozi AI-Coding application shell. */
+.inzozi-sync-mark {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 10px;
+  background: #fff url('/brand/inzozi-ai-mark.webp') center / 31px 31px no-repeat !important;
+  box-shadow: 0 7px 20px rgba(3, 105, 161, 0.18);
+  color: transparent !important;
+  font-size: 0 !important;
+  overflow: hidden;
+}
+
+/* Auth/session surfaces. */
+.auth-mark-image {
+  width: 48px;
+  height: 48px;
+  box-sizing: border-box;
+  object-fit: contain;
+  padding: 3px;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(3, 105, 161, 0.18);
+}
+
+.auth-loading .auth-mark-image {
+  width: 56px;
+  height: 56px;
+  margin-bottom: 4px;
+}
+
+.auth-brand-official {
+  align-items: center;
+  gap: 16px;
+}
+
+.auth-brand-lockup {
+  display: block;
+  width: min(210px, 44%);
+  height: auto;
+  padding: 5px;
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-radius: 10px;
+  background: #fff;
+  object-fit: contain;
+}
+
+.auth-brand-official > div:last-child {
+  min-width: 0;
+}
+
+/* Engineering Space first-run and connected-workspace identity. */
+.inzozi-delivery-body .empty-mark,
+.inzozi-delivery-body .mark,
+.inzozi-delivery-body .studio-mark {
+  background: #fff url('/brand/inzozi-ai-mark.webp') center / 88% 88% no-repeat !important;
+  border-color: rgba(56, 189, 248, 0.28) !important;
+  color: transparent !important;
+  font-size: 0 !important;
+  overflow: hidden;
+}
+
+.inzozi-delivery-body .empty-mark {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+}
+
+/* Keep the approved artwork legible and unobtrusive on smaller screens. */
+@media (max-width: 720px) {
+  .inzozi-sync-mark {
+    flex-basis: 32px;
+    width: 32px;
+    height: 32px;
+    background-size: 28px 28px !important;
+  }
+
+  .auth-brand-official {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .auth-brand-lockup {
+    width: min(220px, 76%);
+  }
+}
