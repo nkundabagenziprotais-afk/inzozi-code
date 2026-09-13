@@ -14,7 +14,11 @@ from app.product.engineering_sync import (
     record_engineering_event,
     update_engineering_binding,
 )
-from app.product.store import ProductNotFoundError, ProductValidationError
+from app.product.store import (
+    ProductNotFoundError,
+    ProductStoreError,
+    ProductValidationError,
+)
 from app.security.auth import AuthPrincipal, require_permission
 
 router = APIRouter(prefix="/v1/products/{product_id}/engineering", tags=["product-engineering"])
@@ -62,7 +66,7 @@ def _ensure_sync_ready() -> None:
 async def _ensure_store() -> None:
     try:
         await run_in_threadpool(_ensure_sync_ready)
-    except EngineeringSyncError as exc:
+    except ProductStoreError as exc:
         raise HTTPException(status_code=503, detail="Engineering synchronization unavailable") from exc
 
 
@@ -79,7 +83,7 @@ async def engineering_summary(product_id: str, request: Request) -> dict:
         )
     except ProductNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Product not found") from exc
-    except EngineeringSyncError as exc:
+    except ProductStoreError as exc:
         raise HTTPException(status_code=503, detail="Engineering synchronization unavailable") from exc
 
 
@@ -104,7 +108,7 @@ async def engineering_binding(
         raise HTTPException(status_code=404, detail="Product not found") from exc
     except ProductValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except EngineeringSyncError as exc:
+    except ProductStoreError as exc:
         raise HTTPException(status_code=503, detail="Unable to update engineering synchronization") from exc
 
 
@@ -131,5 +135,5 @@ async def engineering_event(
         raise HTTPException(status_code=404, detail="Product not found") from exc
     except ProductValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except EngineeringSyncError as exc:
+    except ProductStoreError as exc:
         raise HTTPException(status_code=503, detail="Unable to record engineering evidence") from exc
