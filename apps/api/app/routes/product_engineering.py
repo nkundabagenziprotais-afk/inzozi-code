@@ -9,6 +9,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.product.engineering_sync import (
     EngineeringSyncError,
+    assign_deliverable_to_module,
     ensure_engineering_sync_schema,
     get_engineering_summary,
     record_engineering_event,
@@ -42,6 +43,10 @@ class EngineeringBindingRequest(BaseModel):
     repository_url: str | None = Field(default=None, max_length=2000)
     workspace_id: str | None = Field(default=None, max_length=160)
     repository_ref: str | None = Field(default=None, max_length=255)
+
+
+class DeliverableModuleRequest(BaseModel):
+    module_id: str | None = None
 
 
 class EngineeringEventRequest(BaseModel):
@@ -110,6 +115,32 @@ async def engineering_binding(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ProductStoreError as exc:
         raise HTTPException(status_code=503, detail="Unable to update engineering synchronization") from exc
+
+
+@router.put("/deliverables/{deliverable_id}/module")
+async def deliverable_module_binding(
+    product_id: str,
+    deliverable_id: str,
+    payload: DeliverableModuleRequest,
+    request: Request,
+) -> dict:
+    principal = _principal(request)
+    require_permission(request, "workspace:edit")
+    await _ensure_store()
+    try:
+        return await run_in_threadpool(
+            assign_deliverable_to_module,
+            product_id=product_id,
+            organization_id=principal.organization_id,
+            deliverable_id=deliverable_id,
+            module_id=payload.module_id,
+        )
+    except ProductNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Product not found") from exc
+    except ProductValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ProductStoreError as exc:
+        raise HTTPException(status_code=503, detail="Unable to bind deliverable to module") from exc
 
 
 @router.post("/events", status_code=201)
