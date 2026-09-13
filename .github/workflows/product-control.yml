@@ -8,9 +8,13 @@ on:
       - 'apps/api/app/routes/products.py'
       - 'apps/api/app/routes/product_engineering.py'
       - 'apps/api/tests/test_product_*.py'
+      - 'apps/web/index.html'
+      - 'apps/web/public/brand/**'
+      - 'apps/web/src/AuthGate.tsx'
       - 'apps/web/src/StudioShell.tsx'
       - 'apps/web/src/SolutionModules.tsx'
       - 'apps/web/src/InzoziSolutionSync.tsx'
+      - 'apps/web/src/brand.css'
       - 'apps/web/src/studio-shell.css'
       - 'apps/web/src/studio-shell-refinement.css'
       - 'apps/web/src/studio-live-review.css'
@@ -28,9 +32,13 @@ on:
       - 'apps/api/app/routes/products.py'
       - 'apps/api/app/routes/product_engineering.py'
       - 'apps/api/tests/test_product_*.py'
+      - 'apps/web/index.html'
+      - 'apps/web/public/brand/**'
+      - 'apps/web/src/AuthGate.tsx'
       - 'apps/web/src/StudioShell.tsx'
       - 'apps/web/src/SolutionModules.tsx'
       - 'apps/web/src/InzoziSolutionSync.tsx'
+      - 'apps/web/src/brand.css'
       - 'apps/web/src/studio-shell.css'
       - 'apps/web/src/studio-shell-refinement.css'
       - 'apps/web/src/studio-live-review.css'
@@ -153,6 +161,22 @@ jobs:
           grep -Fq "if (emptySolution && emptySolution.textContent?.trim() !== 'Select a solution')" src/unified-shell.ts
           if grep -Fq "if (emptySolution) emptySolution.textContent = 'Select a solution'" src/unified-shell.ts; then
             echo 'unguarded empty-state text mutation would retrigger the MutationObserver indefinitely' >&2
+            exit 1
+          fi
+      - name: Verify official Inzozi AI brand contract
+        working-directory: apps/web
+        run: |
+          test -s public/brand/inzozi-ai-mark.webp
+          test -s public/brand/inzozi-ai-logo.webp
+          grep -Fq "/brand/inzozi-ai-mark.webp" src/brand.css
+          grep -Fq "/brand/inzozi-ai-logo.webp" src/AuthGate.tsx
+          grep -Fq "import './brand.css'" src/main.tsx
+          grep -Fq '<title>Inzozi AI-Coding</title>' index.html
+          grep -Fq 'href="/brand/inzozi-ai-mark.webp"' index.html
+          grep -Fq 'Opening Inzozi AI-Coding…' src/AuthGate.tsx
+          grep -Fq 'Signed-in Inzozi AI-Coding session' src/AuthGate.tsx
+          if grep -Fq '<div className="auth-mark">IC</div>' src/AuthGate.tsx; then
+            echo 'temporary IC auth mark must not return' >&2
             exit 1
           fi
       - name: Build Aquila Studio product-control UI

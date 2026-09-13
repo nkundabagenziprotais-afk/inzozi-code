@@ -97,8 +97,8 @@ export default function AuthGate({ children }: AuthGateProps) {
   if (status === 'loading') {
     return (
       <main className="auth-shell auth-loading" aria-live="polite">
-        <div className="auth-mark">IC</div>
-        <strong>Opening Inzozi Code…</strong>
+        <img className="auth-mark auth-mark-image" src="/brand/inzozi-ai-mark.webp" alt="" aria-hidden="true" />
+        <strong>Opening Inzozi AI-Coding…</strong>
         <span>Checking the private staging session.</span>
       </main>
     )
@@ -108,12 +108,12 @@ export default function AuthGate({ children }: AuthGateProps) {
     return (
       <main className="auth-shell">
         <section className="auth-card">
-          <div className="auth-brand">
-            <div className="auth-mark">IC</div>
-            <div><strong>Inzozi Code</strong><span>Private staging access</span></div>
+          <div className="auth-brand auth-brand-official">
+            <img className="auth-brand-lockup" src="/brand/inzozi-ai-logo.webp" alt="Inzozi AI Solution" />
+            <div><strong>Inzozi AI-Coding</strong><span>Private staging access</span></div>
           </div>
           <div className="auth-copy">
-            <span className="auth-eyebrow">AQUILA VENTURE STUDIO</span>
+            <span className="auth-eyebrow">INZOZI AI SOLUTION</span>
             <h1>Sign in to the guarded workspace.</h1>
             <p>Repository credentials remain server-side. Your role controls which workspace and Git actions are available.</p>
           </div>
@@ -138,7 +138,7 @@ export default function AuthGate({ children }: AuthGateProps) {
   return (
     <>
       {children}
-      <div className="auth-session-chip" aria-label="Signed-in Inzozi Code session">
+      <div className="auth-session-chip" aria-label="Signed-in Inzozi AI-Coding session">
         <span><strong>{session.email}</strong><small>{ROLE_LABELS[session.role] || session.role}</small></span>
         <button type="button" onClick={signOut} disabled={busy}>Sign out</button>
       </div>
