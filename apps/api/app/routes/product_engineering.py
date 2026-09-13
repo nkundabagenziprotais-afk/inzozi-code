@@ -15,6 +15,7 @@ from app.product.engineering_sync import (
     record_engineering_event,
     update_engineering_binding,
 )
+from app.product.module_delivery import create_module_deliverable
 from app.product.store import (
     ProductNotFoundError,
     ProductStoreError,
@@ -47,6 +48,11 @@ class EngineeringBindingRequest(BaseModel):
 
 class DeliverableModuleRequest(BaseModel):
     module_id: str | None = None
+
+
+class ModuleDeliverableCreateRequest(BaseModel):
+    title: str = Field(min_length=2, max_length=200)
+    description: str = Field(default="", max_length=4000)
 
 
 class EngineeringEventRequest(BaseModel):
@@ -115,6 +121,33 @@ async def engineering_binding(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ProductStoreError as exc:
         raise HTTPException(status_code=503, detail="Unable to update engineering synchronization") from exc
+
+
+@router.post("/modules/{module_id}/deliverables", status_code=201)
+async def new_module_deliverable(
+    product_id: str,
+    module_id: str,
+    payload: ModuleDeliverableCreateRequest,
+    request: Request,
+) -> dict:
+    principal = _principal(request)
+    require_permission(request, "workspace:edit")
+    await _ensure_store()
+    try:
+        return await run_in_threadpool(
+            create_module_deliverable,
+            product_id=product_id,
+            organization_id=principal.organization_id,
+            module_id=module_id,
+            title=payload.title,
+            description=payload.description,
+        )
+    except ProductNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Product or module not found") from exc
+    except ProductValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ProductStoreError as exc:
+        raise HTTPException(status_code=503, detail="Unable to create module deliverable") from exc
 
 
 @router.put("/deliverables/{deliverable_id}/module")
