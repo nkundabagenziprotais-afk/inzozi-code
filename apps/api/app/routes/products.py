@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -11,6 +12,7 @@ from app.product.store import (
     ProductStoreError,
     ProductValidationError,
     create_product,
+    ensure_product_schema,
     get_product_snapshot,
     list_products,
     update_deliverable_status,
@@ -73,6 +75,24 @@ def _principal(request: Request) -> AuthPrincipal:
     if not isinstance(principal, AuthPrincipal):
         raise HTTPException(status_code=401, detail="Authentication required")
     return principal
+
+
+@lru_cache(maxsize=1)
+def _ensure_product_control_ready() -> None:
+    """Initialize Product Control lazily outside database-mode staging startup.
+
+    Database-identity staging still initializes this schema fail-closed during
+    application startup. Local/auth-disabled development remains lightweight and
+    only requires PostgreSQL when Product Control is actually used.
+    """
+    ensure_product_schema()
+
+
+async def _ensure_store() -> None:
+    try:
+        await run_in_threadpool(_ensure_product_control_ready)
+    except ProductStoreError as exc:
+        raise HTTPException(status_code=503, detail="Product store unavailable") from exc
 
 
 def _component(
@@ -307,6 +327,7 @@ def build_initial_product_plan(payload: ProductCreateRequest) -> dict[str, list[
 async def products(request: Request) -> dict:
     principal = _principal(request)
     require_permission(request, "workspace:read")
+    await _ensure_store()
     try:
         items = await run_in_threadpool(list_products, organization_id=principal.organization_id)
     except ProductStoreError as exc:
@@ -321,6 +342,7 @@ async def new_product(payload: ProductCreateRequest, request: Request) -> dict:
     if not payload.platforms:
         raise HTTPException(status_code=400, detail="Select at least one user-experience platform")
 
+    await _ensure_store()
     plan = build_initial_product_plan(payload)
     summary = payload.concept.strip().split("\n", 1)[0][:500]
     try:
@@ -347,6 +369,7 @@ async def new_product(payload: ProductCreateRequest, request: Request) -> dict:
 async def product(product_id: str, request: Request) -> dict:
     principal = _principal(request)
     require_permission(request, "workspace:read")
+    await _ensure_store()
     try:
         return await run_in_threadpool(
             get_product_snapshot,
@@ -368,6 +391,7 @@ async def change_deliverable_status(
 ) -> dict:
     principal = _principal(request)
     require_permission(request, "workspace:edit")
+    await _ensure_store()
     try:
         return await run_in_threadpool(
             update_deliverable_status,
