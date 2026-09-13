@@ -35,10 +35,14 @@ async def lifespan(_: FastAPI):
             except AuthStateUnavailableError as exc:
                 raise RuntimeError("Authentication state service unavailable") from exc
             if settings.auth_identity_mode == "database":
-                # Database identity and product-control state share PostgreSQL and
-                # both must initialize before a multi-user Aquila Studio session.
+                # Fail closed when durable identity schema cannot initialize.
                 ensure_identity_schema()
-                ensure_product_schema()
+
+        # Product Control is now a core Aquila Studio domain, not an optional
+        # engineering feature. Local/development sessions also need its durable
+        # schema even when authentication is intentionally disabled.
+        ensure_product_schema()
+
         if settings.workspace_ownership_enforced:
             # Fail closed in staging if durable ownership cannot be initialized.
             ensure_workspace_ownership_schema()
