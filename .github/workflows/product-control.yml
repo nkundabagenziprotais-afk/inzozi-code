@@ -1,0 +1,67 @@
+name: Product Control
+
+on:
+  pull_request:
+    paths:
+      - 'apps/api/app/product/**'
+      - 'apps/api/app/routes/products.py'
+      - 'apps/api/tests/test_product_*.py'
+      - 'apps/web/src/StudioShell.tsx'
+      - 'apps/web/src/studio-shell.css'
+      - 'apps/web/src/main.tsx'
+      - '.github/workflows/product-control.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/app/product/**'
+      - 'apps/api/app/routes/products.py'
+      - 'apps/api/tests/test_product_*.py'
+      - 'apps/web/src/StudioShell.tsx'
+      - 'apps/web/src/studio-shell.css'
+      - 'apps/web/src/main.tsx'
+      - '.github/workflows/product-control.yml'
+
+jobs:
+  product-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: inzozi_code
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: inzozi_code
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U inzozi_code -d inzozi_code"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test product planning and durable product state
+        working-directory: apps/api
+        env:
+          RUN_POSTGRES_INTEGRATION: "1"
+          DATABASE_URL: postgresql://inzozi_code:test-only@127.0.0.1:5432/inzozi_code
+        run: |
+          python -m pip install -e '.[dev]'
+          pytest -q tests/test_product_planning.py tests/test_product_postgres_integration.py
+
+  product-web-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install
+        working-directory: apps/web
+        run: npm install
+      - name: Build Aquila Studio product-control UI
+        working-directory: apps/web
+        run: npm run build
