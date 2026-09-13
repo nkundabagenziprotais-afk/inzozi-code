@@ -264,6 +264,8 @@ The Inzozi Code alert adapter listens only on `127.0.0.1:8091`.
 
 Neither endpoint may bind to `0.0.0.0`, `::`, the server's public interface, or a public hostname.
 
+Gotify uses a dedicated user-defined Docker bridge network, but that network must not be configured with `internal: true` for this staging topology. Operational proof showed Gotify healthy internally on container port `8080` while the required host-loopback publication at `127.0.0.1:8088` remained unreachable when the container was attached only to the internal bridge. The accepted security boundary remains the explicit `127.0.0.1:8088:8080` binding, the private staging firewall, and SSH-tunnel-only operator access. No Gotify port is published on the server's public interface.
+
 Operator access to the Gotify WebUI uses an SSH local-forward tunnel. Direct mobile/Android connectivity is not enabled by this interim design.
 
 ### Image and secret handling

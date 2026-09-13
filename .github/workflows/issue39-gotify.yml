@@ -136,7 +136,7 @@ jobs:
               "read_only: true",
               "cap_drop:",
               "no-new-privileges:true",
-              "internal: true",
+              "driver: bridge",
               "logging:",
               'max-size: "10m"',
               'max-file: "3"',
@@ -152,6 +152,11 @@ jobs:
           if "gotify/server:latest" in compose:
               raise SystemExit(
                   "FLOATING_GOTIFY_IMAGE"
+              )
+
+          if "internal: true" in compose:
+              raise SystemExit(
+                  "GOTIFY_INTERNAL_NETWORK_FORBIDDEN"
               )
 
           required_adapter = (

@@ -50,4 +50,3 @@ services:
 networks:
   gotify-alerting:
     driver: bridge
-    internal: true
