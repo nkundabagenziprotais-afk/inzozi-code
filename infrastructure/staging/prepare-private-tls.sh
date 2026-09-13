@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOMAIN="${DOMAIN:-code-staging.inzozidigital.com}"
+DOMAIN="${DOMAIN:-ai.inzozidigital.com}"
 TLS_ROOT="${TLS_ROOT:-/etc/inzozi-code/tls}"
 TLS_DIR="${TLS_ROOT}/${DOMAIN}"
 
@@ -43,6 +43,7 @@ if [[ -d "${TLS_DIR}" ]]; then
        grep -Fq "DNS:${DOMAIN}"
   then
     echo "PRIVATE_STAGING_TLS_EXISTING_VALID=PASS"
+    echo "CANONICAL_STAGING_DOMAIN=${DOMAIN}"
     echo "NO_CERTIFICATE_ROTATION"
     exit 0
   fi
@@ -175,6 +176,7 @@ rm -rf "${TMP}"
 
 echo "PRIVATE_STAGING_CA_CREATED=PASS"
 echo "PRIVATE_STAGING_SERVER_CERT_CREATED=PASS"
+echo "CANONICAL_STAGING_DOMAIN=${DOMAIN}"
 echo "PRIVATE_CA_SIGNING_KEY_PERSISTED=NO"
 echo "PUBLIC_CA_CERTIFICATE=NO"
 echo "PUBLIC_DNS_REQUIRED=NO"

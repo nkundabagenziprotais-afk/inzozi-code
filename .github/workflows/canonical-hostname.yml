@@ -1,0 +1,82 @@
+name: Aquila Canonical Hostname
+
+on:
+  pull_request:
+    paths:
+      - 'infrastructure/staging/configure-host-nginx.sh'
+      - 'infrastructure/staging/host-nginx-http.conf.template'
+      - 'infrastructure/staging/host-nginx.conf.template'
+      - 'infrastructure/staging/prepare-private-tls.sh'
+      - 'infrastructure/staging/https-preflight.sh'
+      - 'docs/staging-deployment.md'
+      - '.github/workflows/canonical-hostname.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infrastructure/staging/configure-host-nginx.sh'
+      - 'infrastructure/staging/host-nginx-http.conf.template'
+      - 'infrastructure/staging/host-nginx.conf.template'
+      - 'infrastructure/staging/prepare-private-tls.sh'
+      - 'infrastructure/staging/https-preflight.sh'
+      - 'docs/staging-deployment.md'
+      - '.github/workflows/canonical-hostname.yml'
+
+jobs:
+  canonical-hostname:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate shell syntax
+        run: |
+          set -euo pipefail
+          bash -n infrastructure/staging/configure-host-nginx.sh
+          bash -n infrastructure/staging/prepare-private-tls.sh
+          bash -n infrastructure/staging/https-preflight.sh
+
+      - name: Enforce canonical Aquila hostname
+        run: |
+          set -euo pipefail
+
+          DOMAIN='ai.inzozidigital.com'
+          OLD_DOMAIN='code-staging.inzozidigital.com'
+
+          grep -Fq 'DOMAIN="${DOMAIN:-ai.inzozidigital.com}"' \
+            infrastructure/staging/configure-host-nginx.sh
+          grep -Fq 'DOMAIN="${DOMAIN:-ai.inzozidigital.com}"' \
+            infrastructure/staging/prepare-private-tls.sh
+          grep -Fq 'DOMAIN="${DOMAIN:-ai.inzozidigital.com}"' \
+            infrastructure/staging/https-preflight.sh
+
+          grep -Fq "server_name ${DOMAIN};" \
+            infrastructure/staging/host-nginx-http.conf.template
+          test "$(grep -Fc "server_name ${DOMAIN};" infrastructure/staging/host-nginx.conf.template)" -eq 2
+
+          grep -Fq "/etc/inzozi-code/tls/${DOMAIN}/fullchain.pem" \
+            infrastructure/staging/host-nginx.conf.template
+          grep -Fq "/etc/inzozi-code/tls/${DOMAIN}/privkey.pem" \
+            infrastructure/staging/host-nginx.conf.template
+
+          for path in \
+            infrastructure/staging/configure-host-nginx.sh \
+            infrastructure/staging/host-nginx-http.conf.template \
+            infrastructure/staging/host-nginx.conf.template \
+            infrastructure/staging/prepare-private-tls.sh \
+            infrastructure/staging/https-preflight.sh \
+            docs/staging-deployment.md
+          do
+            if grep -Fq "${OLD_DOMAIN}" "${path}"; then
+              echo "OLD_CANONICAL_HOSTNAME_PRESENT=${path}" >&2
+              exit 1
+            fi
+          done
+
+          grep -Fq '`ai.inzozidigital.com` is the canonical Aquila Studio application hostname.' \
+            docs/staging-deployment.md
+          grep -Fq 'Public activation is a separate release gate under Issue #38.' \
+            docs/staging-deployment.md
+
+          echo 'AQUILA_CANONICAL_HOSTNAME=ai.inzozidigital.com'
+          echo 'OLD_STAGING_HOSTNAME_ACTIVE_REFERENCE=NONE'
+          echo 'PUBLIC_DNS_ACTIVATION=NOT_AUTHORIZED_BY_THIS_CHANGE'
+          echo 'CANONICAL_HOSTNAME_POLICY=PASS'

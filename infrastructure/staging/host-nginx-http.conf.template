@@ -20,7 +20,7 @@ server {
 server {
     listen 80;
     listen [::]:80;
-    server_name code-staging.inzozidigital.com;
+    server_name ai.inzozidigital.com;
 
     limit_req_status 429;
     limit_conn_status 429;

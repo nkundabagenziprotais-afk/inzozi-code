@@ -6,7 +6,7 @@ ENV_FILE="${ENV_FILE:-/srv/inzozi-code/.env.staging}"
 MODE="${MODE:-http}"
 EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA:-}"
 
-DOMAIN="code-staging.inzozidigital.com"
+DOMAIN="${DOMAIN:-ai.inzozidigital.com}"
 SITE_NAME="inzozi-code-staging"
 
 AVAILABLE="/etc/nginx/sites-available/${SITE_NAME}"
@@ -352,6 +352,7 @@ trap - EXIT
 
 echo "HOST_NGINX_CONFIGURATION_MODE=${MODE}"
 echo "reviewed_commit=${CURRENT_COMMIT_SHA}"
+echo "CANONICAL_STAGING_DOMAIN=${DOMAIN}"
 echo "DEFAULT_VHOST_REJECTS_UNKNOWN_HOSTS=PASS"
 echo "HOST_NGINX_FUNCTIONAL_CHECK=PASS"
 echo "NO_DNS_CHANGE"

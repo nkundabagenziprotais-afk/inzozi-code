@@ -155,7 +155,7 @@ jobs:
           grep -q 'limit_req_status 429' infrastructure/staging/host-nginx.conf.template
           grep -q 'limit_conn_status 429' infrastructure/staging/host-nginx.conf.template
           grep -q 'inzozi_login_per_ip' infrastructure/staging/host-nginx-http.conf.template
-          grep -q '/etc/inzozi-code/tls/code-staging.inzozidigital.com/' infrastructure/staging/host-nginx.conf.template
+          grep -q '/etc/inzozi-code/tls/ai.inzozidigital.com/' infrastructure/staging/host-nginx.conf.template
           grep -q 'map $http_x_real_ip $inzozi_client_ip' infrastructure/nginx/default.conf
           grep -q 'proxy_set_header X-Real-IP $inzozi_client_ip;' infrastructure/nginx/default.conf
           grep -q 'proxy_set_header X-Forwarded-Proto $inzozi_forwarded_proto;' infrastructure/nginx/default.conf
@@ -401,7 +401,7 @@ jobs:
             -newkey rsa:2048 \
             -nodes \
             -days 1 \
-            -subj '/CN=code-staging.inzozidigital.com' \
+            -subj '/CN=ai.inzozidigital.com' \
             -keyout "${TMP_TLS}/certs/privkey.pem" \
             -out "${TMP_TLS}/certs/fullchain.pem" \
             >/dev/null 2>&1
@@ -413,7 +413,7 @@ jobs:
 
           docker run --rm \
             -v "$PWD/infrastructure/staging/host-nginx.conf.template:/etc/nginx/conf.d/default.conf:ro" \
-            -v "${TMP_TLS}/certs:/etc/inzozi-code/tls/code-staging.inzozidigital.com:ro" \
+            -v "${TMP_TLS}/certs:/etc/inzozi-code/tls/ai.inzozidigital.com:ro" \
             nginx:1.27-alpine \
             nginx -t
 

@@ -3,7 +3,7 @@ set -euo pipefail
 
 APP_ROOT="${APP_ROOT:-/srv/inzozi-code/application}"
 ENV_FILE="${ENV_FILE:-/srv/inzozi-code/.env.staging}"
-DOMAIN="${DOMAIN:-code-staging.inzozidigital.com}"
+DOMAIN="${DOMAIN:-ai.inzozidigital.com}"
 EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA:-}"
 
 TLS_DIR="/etc/inzozi-code/tls/${DOMAIN}"
@@ -219,6 +219,7 @@ REQUIRE_SECURE_COOKIE=true \
 bash "${APP_ROOT}/infrastructure/staging/auth-preflight.sh"
 
 echo "reviewed_commit=${CURRENT_COMMIT_SHA}"
+echo "CANONICAL_STAGING_DOMAIN=${DOMAIN}"
 echo "PRIVATE_CA_CERTIFICATE_VALID=PASS"
 echo "HTTPS_LISTENER=PASS"
 echo "UNKNOWN_HOST_REJECTION=PASS"
