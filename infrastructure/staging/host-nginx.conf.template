@@ -19,7 +19,7 @@ server {
 server {
     listen 80;
     listen [::]:80;
-    server_name code-staging.inzozidigital.com;
+    server_name ai.inzozidigital.com;
 
     limit_conn inzozi_conn_per_ip 32;
     limit_conn_status 429;
@@ -34,8 +34,8 @@ server {
     listen [::]:443 ssl http2 default_server;
     server_name _;
 
-    ssl_certificate /etc/inzozi-code/tls/code-staging.inzozidigital.com/fullchain.pem;
-    ssl_certificate_key /etc/inzozi-code/tls/code-staging.inzozidigital.com/privkey.pem;
+    ssl_certificate /etc/inzozi-code/tls/ai.inzozidigital.com/fullchain.pem;
+    ssl_certificate_key /etc/inzozi-code/tls/ai.inzozidigital.com/privkey.pem;
 
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_session_tickets off;
@@ -46,10 +46,10 @@ server {
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name code-staging.inzozidigital.com;
+    server_name ai.inzozidigital.com;
 
-    ssl_certificate /etc/inzozi-code/tls/code-staging.inzozidigital.com/fullchain.pem;
-    ssl_certificate_key /etc/inzozi-code/tls/code-staging.inzozidigital.com/privkey.pem;
+    ssl_certificate /etc/inzozi-code/tls/ai.inzozidigital.com/fullchain.pem;
+    ssl_certificate_key /etc/inzozi-code/tls/ai.inzozidigital.com/privkey.pem;
 
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_session_timeout 1d;
