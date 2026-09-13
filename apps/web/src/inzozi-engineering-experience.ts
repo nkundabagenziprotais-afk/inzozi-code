@@ -114,9 +114,8 @@ function prefillRepositoryForm(repository: RepositoryRecord) {
   const repositoryRef = repository.repository_ref ?? ''
   if (refInput && refInput.value !== repositoryRef) emitInput(refInput, repositoryRef)
   const message = form?.querySelector<HTMLElement>('.workspace-message')
-  if (message) {
-    message.textContent = `Repository prepared from ${summary?.repository_resolution === 'module_override' ? 'module override' : 'solution default'}. Open the guarded workspace to continue this deliverable.`
-  }
+  const nextMessage = `Repository prepared from ${summary?.repository_resolution === 'module_override' ? 'module override' : 'solution default'}. Open the guarded workspace to continue this deliverable.`
+  if (message && message.textContent?.trim() !== nextMessage) message.textContent = nextMessage
   return true
 }
 
@@ -196,7 +195,7 @@ async function bindRepositoryToModule(repositoryId: string | null) {
 
 function statusMessage(card: HTMLElement, value: string, isError = false) {
   const target = card.querySelector<HTMLElement>('[data-inzozi-repository-status]')
-  if (!target) return
+  if (!target || target.textContent === value) return
   target.textContent = value
   target.dataset.state = isError ? 'error' : 'ok'
 }
@@ -205,13 +204,26 @@ function repositoryLabel(url: string) {
   return url.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '')
 }
 
-function buildRepositoryCard() {
+function experienceSignature() {
+  const context = selectedContext()
+  return JSON.stringify({
+    product: activeProduct?.product_id ?? '',
+    module: context.moduleId,
+    deliverable: context.deliverableId,
+    resolution: summary?.repository_resolution ?? 'none',
+    resolved: summary?.resolved_repository ?? null,
+    repositories: summary?.repositories ?? [],
+  })
+}
+
+function buildRepositoryCard(signature: string) {
   const context = selectedContext()
   const repositories = summary?.repositories ?? []
   const resolved = summary?.resolved_repository ?? null
   const card = document.createElement('section')
   card.id = 'inzozi-engineering-binding-card'
   card.className = 'inzozi-engineering-binding-card'
+  card.dataset.signature = signature
 
   const options = repositories.map((repository) => (
     `<option value="${escapeHtml(repository.repository_id)}"${resolved?.repository_id === repository.repository_id ? ' selected' : ''}>${escapeHtml(repositoryLabel(repository.repository_url))}${repository.is_default ? ' · solution default' : ''}</option>`
@@ -298,9 +310,23 @@ function buildRepositoryCard() {
   return card
 }
 
+function prepareResolvedWorkspace(resolved: RepositoryRecord | null | undefined) {
+  if (!resolved) return
+  prefillRepositoryForm(resolved)
+  if (!resolved.workspace_id || autoResumeAttempted === resolved.workspace_id) return
+  const prefix = resolved.workspace_id.slice(0, 8)
+  const row = Array.from(document.querySelectorAll<HTMLElement>('.recoverable-workspace-row'))
+    .find((item) => item.textContent?.includes(prefix))
+  const resume = row?.querySelector<HTMLButtonElement>('.recoverable-workspace-resume')
+  if (resume && !resume.disabled) {
+    autoResumeAttempted = resolved.workspace_id
+    window.setTimeout(() => resume.click(), 100)
+  }
+}
+
 function renderRepositoryExperience() {
   normalizeLegacyText(document)
-  const existing = document.querySelector('#inzozi-engineering-binding-card')
+  const existing = document.querySelector<HTMLElement>('#inzozi-engineering-binding-card')
   if (!isEngineeringSurface() || !activeProduct || !summary?.binding?.module_id || !summary?.binding?.deliverable_id) {
     existing?.remove()
     return
@@ -312,25 +338,19 @@ function renderRepositoryExperience() {
     return
   }
 
-  const next = buildRepositoryCard()
+  const signature = experienceSignature()
+  if (existing?.dataset.signature === signature) {
+    prepareResolvedWorkspace(summary.resolved_repository)
+    return
+  }
+
+  const next = buildRepositoryCard(signature)
   if (existing) existing.replaceWith(next)
   else welcomeCard.prepend(next)
-  welcomeCard.classList.add('inzozi-contextual-engineering')
-
-  const resolved = summary.resolved_repository
-  if (resolved) {
-    prefillRepositoryForm(resolved)
-    if (resolved.workspace_id && autoResumeAttempted !== resolved.workspace_id) {
-      const prefix = resolved.workspace_id.slice(0, 8)
-      const row = Array.from(document.querySelectorAll<HTMLElement>('.recoverable-workspace-row'))
-        .find((item) => item.textContent?.includes(prefix))
-      const resume = row?.querySelector<HTMLButtonElement>('.recoverable-workspace-resume')
-      if (resume && !resume.disabled) {
-        autoResumeAttempted = resolved.workspace_id
-        window.setTimeout(() => resume.click(), 100)
-      }
-    }
+  if (!welcomeCard.classList.contains('inzozi-contextual-engineering')) {
+    welcomeCard.classList.add('inzozi-contextual-engineering')
   }
+  prepareResolvedWorkspace(summary.resolved_repository)
 }
 
 function queueRender() {
