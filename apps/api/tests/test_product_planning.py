@@ -1,7 +1,7 @@
-from app.routes.products import ProductCreateRequest, build_initial_product_plan
+from app.routes.products import ModuleSeedRequest, ProductCreateRequest, build_initial_product_plan
 
 
-def test_guided_discovery_builds_platform_and_backend_components():
+def test_guided_discovery_builds_platform_backend_and_solution_modules():
     payload = ProductCreateRequest(
         name="Hospital Management",
         concept=(
@@ -17,6 +17,23 @@ def test_guided_discovery_builds_platform_and_backend_components():
             "reporting",
             "documentation",
             "monitoring",
+        ],
+        modules=[
+            ModuleSeedRequest(
+                name="Patient Registration",
+                description="Register and maintain patient profiles.",
+                priority="must_have",
+            ),
+            ModuleSeedRequest(
+                name="Clinical Consultation",
+                description="Document consultations and care plans.",
+                priority="must_have",
+            ),
+            ModuleSeedRequest(
+                name="Management Dashboard",
+                description="Provide executive operational views.",
+                priority="should_have",
+            ),
         ],
     )
 
@@ -38,6 +55,18 @@ def test_guided_discovery_builds_platform_and_backend_components():
     assert components["experience-web"]["platform"] == "web"
     assert components["experience-android_phone"]["kind"] == "experience"
 
+    assert [item["name"] for item in plan["modules"]] == [
+        "Patient Registration",
+        "Clinical Consultation",
+        "Management Dashboard",
+    ]
+    assert [item["priority"] for item in plan["modules"]] == [
+        "must_have",
+        "must_have",
+        "should_have",
+    ]
+    assert all(item["status"] == "planned" for item in plan["modules"])
+
 
 def test_initial_plan_is_sequenced_and_dependency_aware():
     payload = ProductCreateRequest(
@@ -55,6 +84,7 @@ def test_initial_plan_is_sequenced_and_dependency_aware():
     deliverables = plan["deliverables"]
     dependencies = plan["dependencies"]
 
+    assert plan["modules"] == []
     assert [item["sequence"] for item in deliverables] == list(range(1, len(deliverables) + 1))
     assert deliverables[0]["title"] == "Product blueprint and discovery"
     assert deliverables[0]["status"] == "complete"
@@ -68,3 +98,23 @@ def test_initial_plan_is_sequenced_and_dependency_aware():
     assert ("data-platform", "application-api", "serves") in relationships
     assert ("application-api", "experience-android_phone", "supports") in relationships
     assert ("solution-architecture", "offline-sync", "defines") in relationships
+
+
+def test_duplicate_seed_modules_are_collapsed_case_insensitively():
+    payload = ProductCreateRequest(
+        name="Retail Platform",
+        concept="Create a retail platform with a product catalogue and controlled checkout experience.",
+        platforms=["web"],
+        modules=[
+            ModuleSeedRequest(name="Product Catalogue", priority="must_have"),
+            ModuleSeedRequest(name=" product catalogue ", priority="good_to_have"),
+            ModuleSeedRequest(name="Checkout", priority="must_have"),
+        ],
+    )
+
+    modules = build_initial_product_plan(payload)["modules"]
+
+    assert len(modules) == 2
+    assert modules[0]["name"] == "Product Catalogue"
+    assert modules[0]["priority"] == "must_have"
+    assert modules[1]["name"] == "Checkout"
