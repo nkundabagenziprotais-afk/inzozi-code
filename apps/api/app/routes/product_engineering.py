@@ -87,6 +87,10 @@ def _principal(request: Request) -> AuthPrincipal:
     return principal
 
 
+def _inzozi_text(value: str) -> str:
+    return value.replace("@aquila", "@inzozi").replace("AQUILA", "INZOZI").replace("Aquila", "Inzozi")
+
+
 @lru_cache(maxsize=1)
 def _ensure_sync_ready() -> None:
     ensure_engineering_sync_schema()
@@ -315,7 +319,7 @@ async def engineering_event(
             organization_id=principal.organization_id,
             event_type=payload.event_type,
             status=payload.status,
-            summary=payload.summary,
+            summary=_inzozi_text(payload.summary),
             evidence=payload.evidence,
         )
         return await run_in_threadpool(
