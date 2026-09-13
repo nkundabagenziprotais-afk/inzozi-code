@@ -15,6 +15,7 @@ on:
       - 'apps/web/src/studio-shell-refinement.css'
       - 'apps/web/src/studio-live-review.css'
       - 'apps/web/src/studio-engineering-sync.css'
+      - 'apps/web/src/module-delivery.css'
       - 'apps/web/src/unified-shell.css'
       - 'apps/web/src/unified-shell.ts'
       - 'apps/web/src/main.tsx'
@@ -34,6 +35,7 @@ on:
       - 'apps/web/src/studio-shell-refinement.css'
       - 'apps/web/src/studio-live-review.css'
       - 'apps/web/src/studio-engineering-sync.css'
+      - 'apps/web/src/module-delivery.css'
       - 'apps/web/src/unified-shell.css'
       - 'apps/web/src/unified-shell.ts'
       - 'apps/web/src/main.tsx'
@@ -100,6 +102,23 @@ jobs:
           grep -Fq 'Pending' src/SolutionModules.tsx
           grep -Fq 'Closed' src/SolutionModules.tsx
           grep -Fq 'min-height: 44px;' src/studio-live-review.css
+      - name: Verify module-driven solution delivery contract
+        working-directory: apps/web
+        run: |
+          grep -Fq 'Select module' src/InzoziSolutionSync.tsx
+          grep -Fq 'Select deliverable' src/InzoziSolutionSync.tsx
+          if grep -Fq '>General engineering<' src/InzoziSolutionSync.tsx; then
+            echo 'General engineering must not masquerade as an intended module' >&2
+            exit 1
+          fi
+          grep -Fq 'engineering/deliverables/' src/InzoziSolutionSync.tsx
+          grep -Fq 'REVIEW-ONLY SUGGESTIONS' src/SolutionModules.tsx
+          grep -Fq 'Nothing becomes approved scope until you add it.' src/SolutionModules.tsx
+          grep -Fq 'Derived from accepted deliverables' src/SolutionModules.tsx
+          grep -Fq 'MY SOLUTIONS' src/unified-shell.ts
+          grep -Fq 'Continue in Engineering Space' src/unified-shell.ts
+          grep -Fq "import './module-delivery.css'" src/main.tsx
+          grep -Fq '.studio-module-delivery-track' src/module-delivery.css
       - name: Verify Inzozi AI-Coding Product ↔ Engineering synchronization contract
         working-directory: apps/web
         run: |
