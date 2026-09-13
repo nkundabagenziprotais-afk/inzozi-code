@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import './module-deliverable-planning.css'
 
 export type ModulePriority = 'must_have' | 'should_have' | 'good_to_have'
 export type ModuleStatus = 'planned' | 'in_progress' | 'blocked' | 'complete'
@@ -174,6 +175,9 @@ export default function SolutionModules({ productId, modules, progress, canEdit,
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState<ModulePriority>('must_have')
+  const [planningModuleId, setPlanningModuleId] = useState<string | null>(null)
+  const [deliverableTitle, setDeliverableTitle] = useState('')
+  const [deliverableDescription, setDeliverableDescription] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [message, setMessage] = useState('')
 
@@ -270,6 +274,45 @@ export default function SolutionModules({ productId, modules, progress, canEdit,
     }
   }
 
+  function beginDeliverable(module: ProductModule) {
+    setPlanningModuleId(module.module_id)
+    setDeliverableTitle('')
+    setDeliverableDescription('')
+    setMessage('')
+  }
+
+  function cancelDeliverable() {
+    setPlanningModuleId(null)
+    setDeliverableTitle('')
+    setDeliverableDescription('')
+  }
+
+  async function createDeliverable(event: FormEvent, module: ProductModule) {
+    event.preventDefault()
+    if (!deliverableTitle.trim() || busyId) return
+    const busyKey = `deliverable:${module.module_id}`
+    setBusyId(busyKey)
+    setMessage('')
+    try {
+      setDelivery(await request<DeliverySummary>(
+        `/api/v1/products/${productId}/engineering/modules/${module.module_id}/deliverables`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            title: deliverableTitle.trim(),
+            description: deliverableDescription.trim(),
+          }),
+        },
+      ))
+      cancelDeliverable()
+      await onChanged()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to create module deliverable.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   async function assignDeliverable(module: ProductModule, deliverableId: string) {
     if (!deliverableId || busyId) return
     setBusyId(module.module_id)
@@ -308,7 +351,7 @@ export default function SolutionModules({ productId, modules, progress, canEdit,
         <div>
           <span className="studio-eyebrow">SOLUTION DEVELOPMENT</span>
           <h2 id="solution-modules-heading">Intended modules</h2>
-          <p>Approve the functional scope, attach delivery work, and track what is closed or pending.</p>
+          <p>Approve the functional scope, plan module deliverables, and track what is closed or pending.</p>
         </div>
         {canEdit && <button className="studio-secondary" type="button" onClick={() => setAdding((value) => !value)}>{adding ? 'Close' : '+ Add module'}</button>}
       </div>
@@ -364,6 +407,8 @@ export default function SolutionModules({ productId, modules, progress, canEdit,
                   const linked = delivery?.delivery_deliverables.filter((item) => item.module_id === module.module_id) ?? []
                   const derivedStatus = deliveryModule?.derived_status ?? module.status
                   const percent = deliveryModule?.progress_percent ?? (module.status === 'complete' ? 100 : 0)
+                  const creatingDeliverable = planningModuleId === module.module_id
+                  const busyCreating = busyId === `deliverable:${module.module_id}`
                   return (
                     <article className={`studio-module-row status-${derivedStatus}`} key={module.module_id}>
                       <div className="studio-module-sequence">{String(module.sequence).padStart(2, '0')}</div>
@@ -373,8 +418,55 @@ export default function SolutionModules({ productId, modules, progress, canEdit,
                         <div className="studio-module-delivery">
                           <div className="studio-module-delivery-heading"><strong>Delivery</strong><span>{deliveryModule?.deliverable_complete ?? 0}/{deliveryModule?.deliverable_total ?? 0} complete · {percent}%</span></div>
                           <div className="studio-module-delivery-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: `${percent}%` }} /></div>
-                          {linked.length ? <div className="studio-module-deliverables">{linked.map((item) => <div key={item.deliverable_id}><span className={`studio-status-dot status-${item.status}`} /><strong>{item.title}</strong><small>{STATUS_LABELS[item.status]}</small>{canEdit && <button type="button" disabled={Boolean(busyId)} onClick={() => void detachDeliverable(module, item.deliverable_id)}>Detach</button>}</div>)}</div> : <small>No deliverables attached yet.</small>}
-                          {canEdit && <label className="studio-module-attach-deliverable">Attach deliverable<select defaultValue="" disabled={Boolean(busyId) || !unassigned.length} onChange={(event) => { const value = event.target.value; event.target.value = ''; void assignDeliverable(module, value) }}><option value="">{unassigned.length ? 'Select unassigned deliverable…' : 'All deliverables assigned'}</option>{unassigned.map((item) => <option value={item.deliverable_id} key={item.deliverable_id}>{item.sequence}. {item.title}</option>)}</select></label>}
+                          {linked.length ? <div className="studio-module-deliverables">{linked.map((item) => <div key={item.deliverable_id}><span className={`studio-status-dot status-${item.status}`} /><strong>{item.title}</strong><small>{STATUS_LABELS[item.status]}</small>{canEdit && <button type="button" disabled={Boolean(busyId)} onClick={() => void detachDeliverable(module, item.deliverable_id)}>Detach</button>}</div>)}</div> : <small>No deliverables planned for this module yet.</small>}
+
+                          {canEdit && (
+                            <div className="studio-module-work-planning">
+                              {creatingDeliverable ? (
+                                <form className="studio-module-deliverable-form" onSubmit={(event) => void createDeliverable(event, module)}>
+                                  <div className="studio-module-deliverable-form-heading">
+                                    <strong>New deliverable</strong>
+                                    <span>Create planned work directly under {module.name}.</span>
+                                  </div>
+                                  <label>
+                                    Deliverable title
+                                    <input
+                                      autoFocus
+                                      value={deliverableTitle}
+                                      onChange={(event) => setDeliverableTitle(event.target.value)}
+                                      maxLength={200}
+                                      placeholder="e.g. Assessment and grading workflow"
+                                      required
+                                    />
+                                  </label>
+                                  <label>
+                                    Description <small>optional</small>
+                                    <textarea
+                                      value={deliverableDescription}
+                                      onChange={(event) => setDeliverableDescription(event.target.value)}
+                                      maxLength={4000}
+                                      rows={2}
+                                      placeholder="Define the result Engineering Space should deliver."
+                                    />
+                                  </label>
+                                  <div className="studio-module-deliverable-form-actions">
+                                    <button className="studio-primary" type="submit" disabled={Boolean(busyId) || !deliverableTitle.trim()}>{busyCreating ? 'Creating…' : 'Create deliverable'}</button>
+                                    <button className="studio-secondary" type="button" disabled={Boolean(busyId)} onClick={cancelDeliverable}>Cancel</button>
+                                  </div>
+                                </form>
+                              ) : (
+                                <button className="studio-module-new-deliverable" type="button" disabled={Boolean(busyId)} onClick={() => beginDeliverable(module)}>+ New deliverable</button>
+                              )}
+
+                              <label className="studio-module-attach-deliverable">
+                                Attach existing deliverable
+                                <select defaultValue="" disabled={Boolean(busyId) || !unassigned.length} onChange={(event) => { const value = event.target.value; event.target.value = ''; void assignDeliverable(module, value) }}>
+                                  <option value="">{unassigned.length ? 'Select unassigned deliverable…' : 'All existing deliverables assigned'}</option>
+                                  {unassigned.map((item) => <option value={item.deliverable_id} key={item.deliverable_id}>{item.sequence}. {item.title}</option>)}
+                                </select>
+                              </label>
+                            </div>
+                          )}
                         </div>
                       </div>
                       {canEdit ? <div className="studio-module-controls">
