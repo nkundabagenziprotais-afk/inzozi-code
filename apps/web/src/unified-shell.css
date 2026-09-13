@@ -1,0 +1,287 @@
+/*
+ * Inzozi AI-Coding unified application shell.
+ *
+ * Product Control Center and Engineering Space keep their own internal layouts,
+ * but inherit one application chrome, palette and responsive boundary here.
+ */
+
+.inzozi-delivery-shell {
+  --bg: #08101d;
+  --surface: #0d1828;
+  --surface-2: #111f33;
+  --surface-3: #0a1423;
+  --border: #26364e;
+  --border-strong: #354965;
+  --muted: #8fa0b8;
+  --muted-2: #697d98;
+  --text: #edf4ff;
+  --text-soft: #c9d5e6;
+  --accent: #63d6a0;
+  --accent-strong: #98ecc4;
+  --accent-soft: rgba(99, 214, 160, 0.12);
+  --studio-bg: #08101d;
+  --studio-panel: #0d1828;
+  --studio-panel-soft: #111f33;
+  --studio-border: #26364e;
+  --studio-text: #edf4ff;
+  --studio-muted: #8fa0b8;
+  --studio-accent: #63d6a0;
+  --studio-accent-soft: rgba(99, 214, 160, 0.12);
+  --studio-success: #63d6a0;
+  background: #08101d;
+}
+
+/* The common Inzozi AI-Coding bar is the only application header. */
+.inzozi-delivery-body .studio-topbar,
+.inzozi-delivery-body .app-shell > .topbar,
+.inzozi-delivery-body .studio-return-control {
+  display: none !important;
+}
+
+.inzozi-delivery-body .studio-shell,
+.inzozi-delivery-body .studio-engineering-mode,
+.inzozi-delivery-body .app-shell {
+  height: 100%;
+  min-height: 0;
+}
+
+.inzozi-delivery-body .studio-shell {
+  background:
+    radial-gradient(circle at 18% 0%, rgba(99, 214, 160, 0.06), transparent 32rem),
+    #08101d;
+}
+
+.inzozi-delivery-body .studio-layout {
+  min-height: 100%;
+  height: 100%;
+}
+
+/* Remove the Engineering application's former 60px child-header row. */
+.inzozi-delivery-body .app-shell {
+  min-height: 0;
+  height: 100%;
+  grid-template-rows: minmax(0, 1fr) 210px 30px;
+  background: #08101d;
+}
+
+.inzozi-delivery-body .app-shell.bottom-collapsed {
+  grid-template-rows: minmax(0, 1fr) 42px 30px;
+}
+
+.inzozi-delivery-body .panel,
+.inzozi-delivery-body .welcome-card,
+.inzozi-delivery-body .context-card,
+.inzozi-delivery-body .github-selector-placeholder {
+  background-color: #0d1828;
+  border-color: #26364e;
+}
+
+.inzozi-delivery-body .file-row:hover,
+.inzozi-delivery-body .file-row.selected {
+  background: #122338;
+}
+
+.inzozi-delivery-body .file-row.selected {
+  color: #b8f1d4;
+  box-shadow: inset 2px 0 0 #63d6a0;
+}
+
+.inzozi-delivery-body .studio-mark {
+  background: linear-gradient(135deg, #1f9d73, #2b6cb0);
+  box-shadow: 0 8px 28px rgba(31, 157, 115, 0.18);
+}
+
+/* Make the synchronization flow the primary workspace navigation. */
+.inzozi-sync-flow span[data-unified-nav='true'] {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.inzozi-sync-flow span[data-unified-nav='true']:hover {
+  color: #edf4ff;
+  border-color: rgba(99, 214, 160, 0.22);
+  background: rgba(99, 214, 160, 0.08);
+}
+
+.inzozi-sync-flow span[data-unified-nav='true']:focus-visible {
+  outline: 2px solid rgba(99, 214, 160, 0.5);
+  outline-offset: 2px;
+}
+
+.inzozi-sync-flow span.active[data-unified-nav='true'] {
+  color: #dcfce7;
+  border-color: rgba(99, 214, 160, 0.24);
+  background: rgba(99, 214, 160, 0.14);
+}
+
+.inzozi-sync-brand[data-unified-home='true'] {
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.inzozi-sync-brand[data-unified-home='true']:focus-visible {
+  outline: 2px solid rgba(99, 214, 160, 0.5);
+  outline-offset: 3px;
+}
+
+/* Keep account/session control inside the visual application bar. */
+.auth-session-chip {
+  top: 10px;
+  right: 12px;
+  bottom: auto;
+  z-index: 90;
+  min-height: 40px;
+  max-width: 188px;
+  padding: 5px 6px 5px 9px;
+  border-color: rgba(148, 163, 184, 0.2);
+  background: #0f1b2d;
+  box-shadow: none;
+}
+
+.auth-session-chip strong {
+  max-width: 108px;
+  font-size: 9px;
+}
+
+.auth-session-chip small {
+  font-size: 8px;
+}
+
+.auth-session-chip button {
+  white-space: nowrap;
+  padding: 5px 7px;
+  border-color: rgba(99, 214, 160, 0.28);
+  background: rgba(99, 214, 160, 0.1);
+}
+
+.inzozi-sync-status {
+  margin-right: 198px;
+}
+
+/* Engineering should visually continue directly from the common shell. */
+.studio-engineering-mode {
+  background: #08101d;
+}
+
+.studio-engineering-mode .workspace {
+  border-top: 0;
+}
+
+.studio-engineering-mode .empty-editor.first-run .welcome-card {
+  border-color: #26364e;
+  box-shadow: 0 22px 60px rgba(2, 6, 23, 0.18);
+}
+
+/* Product Control inherits the same navy/green language as Engineering. */
+.studio-sidebar {
+  background: rgba(10, 20, 35, 0.86);
+}
+
+.studio-product-list button.selected {
+  box-shadow: inset 3px 0 0 #63d6a0;
+}
+
+.studio-primary {
+  background: linear-gradient(135deg, #1f9d73, #2f7d68) !important;
+  border-color: rgba(99, 214, 160, 0.35) !important;
+}
+
+/* The legacy sidebar shortcut is secondary now that the common header owns nav. */
+.studio-sidebar-footer {
+  opacity: 0.78;
+}
+
+.studio-sidebar-footer > button {
+  border-color: rgba(148, 163, 184, 0.16) !important;
+  background: rgba(15, 27, 45, 0.72) !important;
+}
+
+@media (max-width: 1280px) {
+  .inzozi-sync-status {
+    margin-right: 170px;
+  }
+
+  .auth-session-chip {
+    max-width: 160px;
+  }
+
+  .auth-session-chip strong {
+    max-width: 80px;
+  }
+}
+
+@media (max-width: 980px) {
+  .auth-session-chip {
+    top: 8px;
+    right: 8px;
+    max-width: 94px;
+  }
+
+  .auth-session-chip span {
+    display: none;
+  }
+
+  .inzozi-sync-status {
+    margin-right: 92px;
+  }
+}
+
+@media (max-width: 820px) {
+  .inzozi-sync-flow {
+    display: flex !important;
+    grid-column: 1 / -1;
+    order: 3;
+    overflow-x: auto;
+    padding-top: 2px;
+    scrollbar-width: none;
+  }
+
+  .inzozi-sync-flow::-webkit-scrollbar {
+    display: none;
+  }
+
+  .inzozi-sync-flow span[data-unified-nav='true'] {
+    min-height: 44px;
+    padding-inline: 12px;
+  }
+
+  .inzozi-sync-context {
+    order: 4;
+  }
+
+  .inzozi-sync-status {
+    margin-right: 86px;
+  }
+}
+
+@media (max-width: 540px) {
+  .auth-session-chip {
+    left: auto;
+    right: 8px;
+    top: 7px;
+    bottom: auto;
+    width: auto;
+    min-height: 38px;
+  }
+
+  .inzozi-sync-status {
+    margin-right: 76px;
+  }
+
+  .inzozi-sync-brand strong {
+    font-size: 12px;
+  }
+
+  .inzozi-sync-flow {
+    gap: 5px;
+  }
+
+  .inzozi-sync-flow b {
+    display: none;
+  }
+}
