@@ -1,0 +1,118 @@
+.studio-module-work-planning {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.studio-module-new-deliverable {
+  justify-self: start;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  border-radius: 9px;
+  background: rgba(16, 185, 129, 0.08);
+  color: #9ef1cf;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.studio-module-new-deliverable:hover:not(:disabled) {
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(52, 211, 153, 0.55);
+}
+
+.studio-module-new-deliverable:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.studio-module-deliverable-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 10px 12px;
+  padding: 14px;
+  border: 1px solid rgba(52, 211, 153, 0.24);
+  border-radius: 12px;
+  background: rgba(8, 24, 38, 0.72);
+}
+
+.studio-module-deliverable-form-heading {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 3px;
+}
+
+.studio-module-deliverable-form-heading strong {
+  color: #edf8f4;
+  font-size: 13px;
+}
+
+.studio-module-deliverable-form-heading span {
+  color: #91a4b8;
+  font-size: 11px;
+}
+
+.studio-module-deliverable-form label {
+  display: grid;
+  gap: 6px;
+  color: #9fb1c5;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.studio-module-deliverable-form label small {
+  color: #718399;
+  font-weight: 500;
+}
+
+.studio-module-deliverable-form input,
+.studio-module-deliverable-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #24364c;
+  border-radius: 9px;
+  background: #08131f;
+  color: #eef5ff;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.studio-module-deliverable-form input {
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.studio-module-deliverable-form textarea {
+  min-height: 68px;
+  padding: 9px 10px;
+  resize: vertical;
+}
+
+.studio-module-deliverable-form input:focus,
+.studio-module-deliverable-form textarea:focus {
+  border-color: rgba(52, 211, 153, 0.62);
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.1);
+}
+
+.studio-module-deliverable-form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .studio-module-deliverable-form {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-module-deliverable-form-heading,
+  .studio-module-deliverable-form-actions {
+    grid-column: 1;
+  }
+}

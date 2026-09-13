@@ -15,6 +15,7 @@ from app.product.engineering_sync import (
     record_engineering_event,
     update_engineering_binding,
 )
+from app.product.module_delivery import create_module_deliverable
 from app.product.store import (
     ProductNotFoundError,
     ProductValidationError,
@@ -110,10 +111,109 @@ def test_engineering_sync_api_contract_is_exposed():
     assert "/v1/products/{product_id}/engineering/binding" in paths
     assert "/v1/products/{product_id}/engineering/events" in paths
     assert "/v1/products/{product_id}/engineering/deliverables/{deliverable_id}/module" in paths
+    assert "/v1/products/{product_id}/engineering/modules/{module_id}/deliverables" in paths
     assert "get" in paths["/v1/products/{product_id}/engineering"]
     assert "put" in paths["/v1/products/{product_id}/engineering/binding"]
     assert "post" in paths["/v1/products/{product_id}/engineering/events"]
     assert "put" in paths["/v1/products/{product_id}/engineering/deliverables/{deliverable_id}/module"]
+    assert "post" in paths["/v1/products/{product_id}/engineering/modules/{module_id}/deliverables"]
+
+
+def test_module_deliverable_creation_is_atomic_sequenced_and_handoff_ready():
+    solution = _create_solution()
+    module = solution["modules"][0]
+    max_sequence = max(item["sequence"] for item in solution["deliverables"])
+
+    created = create_module_deliverable(
+        product_id=solution["product_id"],
+        organization_id="org-a",
+        module_id=module["module_id"],
+        title="Product Control module work breakdown",
+        description="Create and synchronize module-specific deliverables into Engineering Space.",
+    )
+
+    deliverable = next(
+        item for item in created["delivery_deliverables"]
+        if item["title"] == "Product Control module work breakdown"
+    )
+    assert deliverable["sequence"] == max_sequence + 1
+    assert deliverable["status"] == "planned"
+    assert deliverable["module_id"] == module["module_id"]
+    assert deliverable["module_name"] == module["name"]
+
+    module_progress = next(
+        item for item in created["module_delivery"]
+        if item["module_id"] == module["module_id"]
+    )
+    assert module_progress["deliverable_total"] == 1
+    assert module_progress["deliverable_complete"] == 0
+    assert module_progress["progress_percent"] == 0
+
+    snapshot = get_product_snapshot(product_id=solution["product_id"], organization_id="org-a")
+    persisted = next(
+        item for item in snapshot["deliverables"]
+        if item["deliverable_id"] == deliverable["deliverable_id"]
+    )
+    assert persisted["sequence"] == max_sequence + 1
+    assert persisted["status"] == "planned"
+
+    bound = update_engineering_binding(
+        product_id=solution["product_id"],
+        organization_id="org-a",
+        changes={
+            "module_id": module["module_id"],
+            "deliverable_id": deliverable["deliverable_id"],
+        },
+    )
+    assert bound["binding"]["module_id"] == module["module_id"]
+    assert bound["binding"]["deliverable_id"] == deliverable["deliverable_id"]
+
+    record_engineering_event(
+        product_id=solution["product_id"],
+        organization_id="org-a",
+        event_type="engineering_opened",
+        status="info",
+        summary="Engineering Space opened for the planned module deliverable.",
+        evidence={},
+    )
+    refreshed = get_product_snapshot(product_id=solution["product_id"], organization_id="org-a")
+    refreshed_deliverable = next(
+        item for item in refreshed["deliverables"]
+        if item["deliverable_id"] == deliverable["deliverable_id"]
+    )
+    refreshed_module = next(
+        item for item in refreshed["modules"]
+        if item["module_id"] == module["module_id"]
+    )
+    assert refreshed_deliverable["status"] == "in_progress"
+    assert refreshed_module["status"] == "in_progress"
+    assert refreshed_deliverable["status"] != "complete"
+    assert refreshed_module["status"] != "complete"
+
+
+def test_module_deliverable_creation_is_organization_and_module_scoped():
+    first = _create_solution(organization_id="org-a")
+    second = _create_solution(organization_id="org-b")
+
+    with pytest.raises(ProductNotFoundError):
+        create_module_deliverable(
+            product_id=first["product_id"],
+            organization_id="org-b",
+            module_id=first["modules"][0]["module_id"],
+            title="Unauthorized work",
+        )
+
+    with pytest.raises(ProductValidationError):
+        create_module_deliverable(
+            product_id=first["product_id"],
+            organization_id="org-a",
+            module_id=second["modules"][0]["module_id"],
+            title="Foreign module work",
+        )
+
+    summary = get_engineering_summary(product_id=first["product_id"], organization_id="org-a")
+    assert all(item["title"] != "Unauthorized work" for item in summary["delivery_deliverables"])
+    assert all(item["title"] != "Foreign module work" for item in summary["delivery_deliverables"])
 
 
 def test_module_delivery_binding_and_progress_are_persistent_and_acceptance_driven():
