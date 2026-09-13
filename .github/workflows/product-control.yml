@@ -15,6 +15,8 @@ on:
       - 'apps/web/src/studio-shell-refinement.css'
       - 'apps/web/src/studio-live-review.css'
       - 'apps/web/src/studio-engineering-sync.css'
+      - 'apps/web/src/unified-shell.css'
+      - 'apps/web/src/unified-shell.ts'
       - 'apps/web/src/main.tsx'
       - '.github/workflows/product-control.yml'
   push:
@@ -32,6 +34,8 @@ on:
       - 'apps/web/src/studio-shell-refinement.css'
       - 'apps/web/src/studio-live-review.css'
       - 'apps/web/src/studio-engineering-sync.css'
+      - 'apps/web/src/unified-shell.css'
+      - 'apps/web/src/unified-shell.ts'
       - 'apps/web/src/main.tsx'
       - '.github/workflows/product-control.yml'
 
@@ -111,6 +115,19 @@ jobs:
           grep -Fq 'One solution · synchronized delivery' src/InzoziSolutionSync.tsx
           grep -Fq 'height: 100dvh;' src/studio-engineering-sync.css
           grep -Fq 'min-height: 44px;' src/studio-engineering-sync.css
+      - name: Verify unified Inzozi AI-Coding shell contract
+        working-directory: apps/web
+        run: |
+          grep -Fq '.inzozi-delivery-body .studio-topbar' src/unified-shell.css
+          grep -Fq '.inzozi-delivery-body .app-shell > .topbar' src/unified-shell.css
+          grep -Fq '.inzozi-delivery-body .studio-return-control' src/unified-shell.css
+          grep -Fq "data-unified-nav" src/unified-shell.ts
+          grep -Fq 'goToProjectControl' src/unified-shell.ts
+          grep -Fq 'goToEngineering' src/unified-shell.ts
+          grep -Fq "import './unified-shell.css'" src/main.tsx
+          grep -Fq "import './unified-shell'" src/main.tsx
+          grep -Fq 'top: 10px;' src/unified-shell.css
+          grep -Fq 'margin-right: 198px;' src/unified-shell.css
       - name: Build Aquila Studio product-control UI
         working-directory: apps/web
         run: npm run build
