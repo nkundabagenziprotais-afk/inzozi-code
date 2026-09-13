@@ -73,9 +73,15 @@ function normalizeProjectControlHome() {
     foundationCopy.textContent = 'Plan and govern work here, then continue the selected module and deliverable in Engineering Space. Engineering evidence synchronizes back into Project Control.'
   }
 
-  const emptySolution = document.querySelector<HTMLElement>('.inzozi-sync-product.empty strong')
-  if (emptySolution?.textContent?.trim() === 'Select a solution in Project Control') {
-    emptySolution.textContent = 'Choose a solution from My Products'
+  const syncBar = document.querySelector<HTMLElement>('.inzozi-sync-bar')
+  const emptyProduct = document.querySelector<HTMLElement>('.inzozi-sync-product.empty')
+
+  if (emptyProduct) {
+    const emptySolution = emptyProduct.querySelector<HTMLElement>('strong')
+    if (emptySolution) emptySolution.textContent = 'Select a solution'
+    syncBar?.setAttribute('data-no-active-solution', 'true')
+  } else {
+    syncBar?.removeAttribute('data-no-active-solution')
   }
 }
 
