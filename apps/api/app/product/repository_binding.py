@@ -281,12 +281,16 @@ def remember_repository_workspace(
     workspace_id: str,
     module_id: str | None = None,
 ) -> dict[str, Any]:
+    """Remember the last guarded workspace without changing module inheritance semantics."""
+
     ensure_repository_binding_schema()
     normalized = normalize_repository_url(repository_url)
     ref = (repository_ref or "").strip() or None
     try:
         with _connect(autocommit=False) as connection, connection.cursor() as cursor:
             _assert_product_access(cursor, product_id=product_id, organization_id=organization_id)
+            if module_id:
+                _assert_module(cursor, product_id=product_id, module_id=module_id)
             cursor.execute(
                 "SELECT repository_id FROM aquila_product_repositories WHERE product_id = %s AND repository_url = %s",
                 (product_id, normalized),
@@ -316,18 +320,6 @@ def remember_repository_workspace(
                     ) VALUES (%s, %s, %s, %s, %s, %s)
                     """,
                     (repository_id, product_id, normalized, ref, workspace_id, is_default),
-                )
-            if module_id:
-                _assert_module(cursor, product_id=product_id, module_id=module_id)
-                cursor.execute(
-                    """
-                    INSERT INTO aquila_product_module_repositories (
-                        binding_id, product_id, module_id, repository_id
-                    ) VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (product_id, module_id)
-                    DO UPDATE SET repository_id = EXCLUDED.repository_id, updated_at = NOW()
-                    """,
-                    (str(uuid4()), product_id, module_id, repository_id),
                 )
             connection.commit()
             return _state(cursor, product_id=product_id, module_id=module_id)
