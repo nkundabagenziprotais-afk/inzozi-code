@@ -1,0 +1,165 @@
+.inzozi-engineering-binding-card {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid rgba(71, 207, 163, 0.28);
+  border-radius: 14px;
+  background: rgba(10, 28, 34, 0.92);
+  text-align: left;
+}
+
+.inzozi-repository-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.inzozi-repository-heading > div {
+  display: grid;
+  gap: 4px;
+}
+
+.inzozi-repository-heading span,
+.inzozi-engineering-binding-card label,
+.inzozi-engineering-binding-card small {
+  color: var(--muted, #8fa2ad);
+}
+
+.inzozi-repository-heading > div > span {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.inzozi-repository-heading strong {
+  color: var(--text, #eef5f3);
+  font-size: 16px;
+}
+
+.inzozi-repository-resolution {
+  padding: 5px 8px;
+  border: 1px solid rgba(71, 207, 163, 0.35);
+  border-radius: 999px;
+  color: #80e2bd !important;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.inzozi-engineering-binding-card p {
+  margin: 0;
+  color: #a9b8bf;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.inzozi-engineering-binding-card form,
+.inzozi-existing-repository-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(140px, 0.75fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.inzozi-engineering-binding-card label {
+  display: grid;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.inzozi-engineering-binding-card input,
+.inzozi-engineering-binding-card select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 11px;
+  border: 1px solid #263b45;
+  border-radius: 9px;
+  background: #071318;
+  color: #eef5f3;
+  outline: none;
+}
+
+.inzozi-engineering-binding-card input:focus,
+.inzozi-engineering-binding-card select:focus {
+  border-color: #38b98c;
+  box-shadow: 0 0 0 2px rgba(56, 185, 140, 0.13);
+}
+
+.inzozi-default-check {
+  display: flex !important;
+  align-items: center;
+  gap: 7px !important;
+  min-height: 42px;
+  grid-column: 1 / -1;
+}
+
+.inzozi-default-check input {
+  width: 16px;
+  min-height: 16px;
+  accent-color: #35b88a;
+}
+
+.inzozi-repository-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+
+.inzozi-engineering-binding-card button {
+  min-height: 40px;
+  padding: 0 13px;
+  border: 1px solid #2a414a;
+  border-radius: 9px;
+  background: #0d1b21;
+  color: #d8e6e2;
+  cursor: pointer;
+}
+
+.inzozi-engineering-binding-card button:hover {
+  border-color: #3f655d;
+}
+
+.inzozi-engineering-binding-card button.primary-action {
+  border-color: #2cab82;
+  background: #168c68;
+  color: #fff;
+  font-weight: 750;
+}
+
+[data-inzozi-repository-status] {
+  grid-column: 1 / -1;
+}
+
+[data-inzozi-repository-status][data-state='error'] {
+  color: #ff8b8b !important;
+}
+
+[data-inzozi-repository-status][data-state='ok'] {
+  color: #80e2bd !important;
+}
+
+.welcome-card.inzozi-contextual-engineering {
+  max-width: 780px;
+}
+
+@media (max-width: 820px) {
+  .inzozi-repository-heading,
+  .inzozi-existing-repository-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .inzozi-engineering-binding-card form {
+    grid-template-columns: 1fr;
+  }
+
+  .inzozi-repository-resolution {
+    width: fit-content;
+  }
+}
