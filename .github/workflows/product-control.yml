@@ -8,6 +8,7 @@ on:
       - 'apps/api/tests/test_product_*.py'
       - 'apps/web/src/StudioShell.tsx'
       - 'apps/web/src/studio-shell.css'
+      - 'apps/web/src/studio-shell-refinement.css'
       - 'apps/web/src/main.tsx'
       - '.github/workflows/product-control.yml'
   push:
@@ -18,6 +19,7 @@ on:
       - 'apps/api/tests/test_product_*.py'
       - 'apps/web/src/StudioShell.tsx'
       - 'apps/web/src/studio-shell.css'
+      - 'apps/web/src/studio-shell-refinement.css'
       - 'apps/web/src/main.tsx'
       - '.github/workflows/product-control.yml'
 
@@ -62,6 +64,13 @@ jobs:
       - name: Install
         working-directory: apps/web
         run: npm install
+      - name: Verify Aquila Studio scrolling contract
+        working-directory: apps/web
+        run: |
+          grep -Fq 'height: 100dvh;' src/studio-shell-refinement.css
+          grep -Fq 'overflow-y: auto;' src/studio-shell-refinement.css
+          grep -Fq 'overscroll-behavior-y: contain;' src/studio-shell-refinement.css
+          grep -Fq 'touch-action: pan-x;' src/studio-shell-refinement.css
       - name: Build Aquila Studio product-control UI
         working-directory: apps/web
         run: npm run build
