@@ -51,7 +51,12 @@ function legacyToInzozi(value: string) {
     .replaceAll('Aquila', 'Inzozi')
 }
 
-function normalizeLegacyText(root: ParentNode | Node = document) {
+function parentNode(root: Node): Document | Element | DocumentFragment | null {
+  if (root instanceof Document || root instanceof Element || root instanceof DocumentFragment) return root
+  return null
+}
+
+function normalizeLegacyText(root: Node = document) {
   if (root instanceof Text) {
     const current = root.nodeValue ?? ''
     const next = legacyToInzozi(current)
@@ -59,7 +64,8 @@ function normalizeLegacyText(root: ParentNode | Node = document) {
     return
   }
 
-  const parent = root instanceof ParentNode ? root : document
+  const parent = parentNode(root)
+  if (!parent) return
   const walker = document.createTreeWalker(parent, NodeFilter.SHOW_TEXT)
   let node = walker.nextNode()
   while (node) {
@@ -69,25 +75,27 @@ function normalizeLegacyText(root: ParentNode | Node = document) {
     node = walker.nextNode()
   }
 
-  if (root instanceof Element) {
+  const elements: Element[] = []
+  if (root instanceof Element) elements.push(root)
+  parent.querySelectorAll('[aria-label], [title], [placeholder]').forEach((element) => elements.push(element))
+  for (const element of elements) {
     for (const attribute of ['aria-label', 'title', 'placeholder']) {
-      const current = root.getAttribute(attribute)
+      const current = element.getAttribute(attribute)
       if (!current) continue
       const next = legacyToInzozi(current)
-      if (next !== current) root.setAttribute(attribute, next)
+      if (next !== current) element.setAttribute(attribute, next)
     }
   }
+}
 
-  if (parent instanceof Document || parent instanceof Element) {
-    parent.querySelectorAll('[aria-label], [title], [placeholder]').forEach((element) => {
-      for (const attribute of ['aria-label', 'title', 'placeholder']) {
-        const current = element.getAttribute(attribute)
-        if (!current) continue
-        const next = legacyToInzozi(current)
-        if (next !== current) element.setAttribute(attribute, next)
-      }
-    })
-  }
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character] ?? character)
 }
 
 function emitInput(input: HTMLInputElement, value: string) {
@@ -100,9 +108,7 @@ function emitInput(input: HTMLInputElement, value: string) {
 function prefillRepositoryForm(repository: RepositoryRecord) {
   const repositoryInput = document.querySelector<HTMLInputElement>('#repository-url')
   if (!repositoryInput) return false
-  if (repositoryInput.value !== repository.repository_url) {
-    emitInput(repositoryInput, repository.repository_url)
-  }
+  if (repositoryInput.value !== repository.repository_url) emitInput(repositoryInput, repository.repository_url)
   const form = repositoryInput.closest('form')
   const refInput = form?.querySelector<HTMLInputElement>('input[placeholder="main"]')
   const repositoryRef = repository.repository_ref ?? ''
@@ -208,20 +214,25 @@ function buildRepositoryCard() {
   card.className = 'inzozi-engineering-binding-card'
 
   const options = repositories.map((repository) => (
-    `<option value="${repository.repository_id}"${resolved?.repository_id === repository.repository_id ? ' selected' : ''}>${repositoryLabel(repository.repository_url)}${repository.is_default ? ' · solution default' : ''}</option>`
+    `<option value="${escapeHtml(repository.repository_id)}"${resolved?.repository_id === repository.repository_id ? ' selected' : ''}>${escapeHtml(repositoryLabel(repository.repository_url))}${repository.is_default ? ' · solution default' : ''}</option>`
   )).join('')
+  const moduleLabel = escapeHtml(context.moduleLabel)
+  const deliverableLabel = escapeHtml(context.deliverableLabel)
+  const resolvedUrl = escapeHtml(resolved?.repository_url ?? '')
+  const resolvedRef = escapeHtml(resolved?.repository_ref ?? '')
+  const resolvedLabel = escapeHtml(resolved ? repositoryLabel(resolved.repository_url) : '')
 
   card.innerHTML = `
     <div class="inzozi-repository-heading">
       <div>
         <span>ENGINEERING CONTEXT</span>
-        <strong>${context.moduleLabel} is ready for engineering</strong>
-        <small>${context.deliverableLabel}</small>
+        <strong>${moduleLabel} is ready for engineering</strong>
+        <small>${deliverableLabel}</small>
       </div>
       <span class="inzozi-repository-resolution">${resolved ? (summary?.repository_resolution === 'module_override' ? 'Module repository' : 'Solution default') : 'Repository required'}</span>
     </div>
     <p>${resolved
-      ? `Inzozi will use <strong>${repositoryLabel(resolved.repository_url)}</strong> for this work item and keep engineering evidence synchronized back to Project Control.`
+      ? `Inzozi will use <strong>${resolvedLabel}</strong> for this work item and keep engineering evidence synchronized back to Project Control.`
       : 'Connect the repository that contains this solution. Inzozi will remember it and keep code, tests and delivery evidence synchronized with this work item.'}
     </p>
     ${repositories.length ? `
@@ -237,10 +248,10 @@ function buildRepositoryCard() {
     ` : ''}
     <form data-inzozi-add-repository>
       <label>Repository HTTPS URL
-        <input type="url" required placeholder="https://github.com/owner/repo" value="${resolved?.repository_url ?? ''}">
+        <input type="url" required placeholder="https://github.com/owner/repo" value="${resolvedUrl}">
       </label>
       <label>Branch / ref <span>optional</span>
-        <input type="text" placeholder="main" value="${resolved?.repository_ref ?? ''}">
+        <input type="text" placeholder="main" value="${resolvedRef}">
       </label>
       <label class="inzozi-default-check"><input type="checkbox" ${repositories.some((item) => item.is_default) ? '' : 'checked'}> Use as solution default</label>
       <div class="inzozi-repository-actions">
@@ -248,7 +259,7 @@ function buildRepositoryCard() {
         ${resolved ? '<button type="button" data-inzozi-prepare>Prepare workspace form</button>' : ''}
         <button type="button" data-inzozi-return>Return to Project Control</button>
       </div>
-      <small data-inzozi-repository-status>${resolved?.workspace_id ? `Last workspace ${resolved.workspace_id.slice(0, 8)} is remembered.` : resolved ? 'Repository is bound. Open a guarded workspace to begin engineering.' : 'No repository is bound yet.'}</small>
+      <small data-inzozi-repository-status>${resolved?.workspace_id ? `Last workspace ${escapeHtml(resolved.workspace_id.slice(0, 8))} is remembered.` : resolved ? 'Repository is bound. Open a guarded workspace to begin engineering.' : 'No repository is bound yet.'}</small>
     </form>
   `
 
