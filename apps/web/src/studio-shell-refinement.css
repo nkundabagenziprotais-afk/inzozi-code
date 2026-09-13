@@ -1,0 +1,556 @@
+/* Aquila Studio v0.2 visual refinement.
+   Loaded after studio-shell.css so this file can improve hierarchy and
+   responsive behavior without rewriting the accepted Product Control shell. */
+
+.studio-topbar nav button:nth-child(2) {
+  color: #7f8ba5;
+  font-size: 11px;
+}
+
+.studio-topbar nav button:nth-child(2)::before {
+  content: "Advanced · ";
+  color: #58657f;
+}
+
+.studio-metrics {
+  border: 1px solid var(--studio-border);
+  border-radius: 14px;
+  overflow: hidden;
+  gap: 0;
+  background: rgba(17, 24, 42, .74);
+}
+
+.studio-metrics article {
+  border: 0;
+  border-right: 1px solid var(--studio-border);
+  border-radius: 0;
+  background: transparent;
+  min-height: 92px;
+}
+
+.studio-metrics article:last-child {
+  border-right: 0;
+}
+
+.studio-progress-card {
+  box-shadow: none;
+  background: rgba(13, 20, 36, .68);
+}
+
+.studio-card,
+.studio-create-card {
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .1);
+}
+
+.studio-deliverable-copy strong {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.studio-deliverable-copy p {
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.studio-deliverable select {
+  min-height: 34px;
+  padding: 7px 9px;
+  font-size: 10px;
+}
+
+.studio-blueprint-concept,
+.studio-blueprint-list dd {
+  font-size: 11px;
+}
+
+.studio-dependencies strong,
+.studio-dependencies > small {
+  font-size: 10px;
+}
+
+.studio-dependencies span {
+  font-size: 9px;
+}
+
+.studio-component-group > span,
+.studio-component-group p,
+.studio-component-group small {
+  font-size: 9px;
+}
+
+.studio-component-group strong {
+  font-size: 11px;
+}
+
+@media (max-width: 1100px) {
+  .studio-topbar {
+    grid-template-columns: 210px 1fr 92px;
+    padding-inline: 18px;
+    gap: 16px;
+  }
+
+  .studio-layout {
+    grid-template-columns: 204px minmax(0, 1fr);
+  }
+
+  .studio-main {
+    padding: 22px;
+  }
+
+  .studio-sidebar {
+    padding-inline: 12px;
+  }
+
+  .studio-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .studio-metrics article:nth-child(2) {
+    border-right: 0;
+  }
+
+  .studio-metrics article:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--studio-border);
+  }
+
+  .studio-side-stack {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .studio-component-groups {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .studio-shell {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .studio-topbar {
+    min-height: 58px;
+    height: 58px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 8px 12px;
+  }
+
+  .studio-brand {
+    min-width: 0;
+  }
+
+  .studio-brand strong {
+    font-size: 14px;
+  }
+
+  .studio-mark {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+  }
+
+  .studio-topbar nav {
+    display: none;
+  }
+
+  .studio-aquila-state {
+    grid-column: 2;
+    grid-row: 1;
+    font-size: 0;
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--studio-border);
+    border-radius: 10px;
+    background: var(--studio-panel-soft);
+  }
+
+  .studio-aquila-state span {
+    margin: 0;
+    font-size: 14px;
+  }
+
+  .studio-layout {
+    display: block;
+    min-height: calc(100vh - 58px);
+  }
+
+  /* Mobile product navigation becomes a compact horizontal workspace switcher
+     instead of a desktop sidebar stacked above the whole screen. */
+  .studio-sidebar {
+    position: sticky;
+    top: 58px;
+    z-index: 24;
+    max-height: none;
+    overflow: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--studio-border);
+    padding: 8px 10px 9px;
+    gap: 7px;
+    background: rgba(11, 16, 32, .96);
+    backdrop-filter: blur(18px);
+  }
+
+  .studio-sidebar-heading {
+    min-height: 34px;
+    padding-inline: 2px;
+    font-size: 9px;
+  }
+
+  .studio-sidebar-heading::after {
+    content: "Swipe to switch";
+    margin-left: auto;
+    margin-right: 8px;
+    color: #5e6b84;
+    letter-spacing: 0;
+    font-size: 9px;
+    font-weight: 600;
+  }
+
+  .studio-sidebar-heading button {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+  }
+
+  .studio-product-list {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(168px, 58vw);
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 1px 1px 4px;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  .studio-product-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .studio-product-list button {
+    min-height: 58px;
+    padding: 9px 11px;
+    scroll-snap-align: start;
+    border-color: #202b43;
+    background: rgba(17, 24, 42, .72);
+  }
+
+  .studio-product-list button.selected {
+    box-shadow: inset 0 -3px 0 var(--studio-accent);
+    border-color: #5362ac;
+    background: rgba(77, 90, 172, .14);
+  }
+
+  .studio-product-list strong {
+    font-size: 12px;
+  }
+
+  .studio-product-list span {
+    font-size: 10px;
+  }
+
+  .studio-product-list small {
+    display: none;
+  }
+
+  .studio-sidebar > .studio-muted {
+    margin: 0;
+    padding: 8px 4px;
+    font-size: 11px;
+  }
+
+  .studio-sidebar-footer {
+    display: none;
+  }
+
+  .studio-main {
+    padding: 14px 12px 20px;
+    overflow: visible;
+  }
+
+  .studio-welcome {
+    padding: 22px 0 28px;
+    gap: 22px;
+  }
+
+  .studio-welcome-copy h1 {
+    font-size: clamp(34px, 10vw, 44px);
+    line-height: 1.04;
+    margin-bottom: 16px;
+  }
+
+  .studio-welcome-copy > p {
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .studio-welcome-actions {
+    margin-top: 20px;
+  }
+
+  .studio-welcome-actions .studio-primary,
+  .studio-welcome-actions .studio-secondary {
+    min-height: 44px;
+  }
+
+  .studio-product-hero {
+    gap: 18px;
+    padding: 6px 2px 18px;
+  }
+
+  .studio-product-hero h1 {
+    font-size: 29px;
+    line-height: 1.08;
+  }
+
+  .studio-product-hero p {
+    font-size: 13px;
+  }
+
+  .studio-tags span,
+  .studio-status-label {
+    font-size: 10px;
+    padding: 6px 9px;
+  }
+
+  .studio-hero-actions {
+    width: 100%;
+  }
+
+  .studio-hero-actions .studio-primary {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .studio-hero-actions small {
+    display: none;
+  }
+
+  .studio-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .studio-metrics article {
+    min-height: 92px;
+    padding: 12px;
+  }
+
+  .studio-metrics span {
+    font-size: 10px;
+  }
+
+  .studio-metrics strong {
+    font-size: 24px;
+  }
+
+  .studio-metrics strong.metric-text {
+    font-size: 13px;
+  }
+
+  .studio-metrics small {
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
+  .studio-progress-card {
+    padding: 12px;
+  }
+
+  .studio-card,
+  .studio-create-card {
+    border-radius: 12px;
+    padding: 15px;
+  }
+
+  .studio-card-heading h2 {
+    font-size: 16px;
+  }
+
+  .studio-card-heading > small {
+    font-size: 10px;
+  }
+
+  .studio-control-grid {
+    gap: 10px;
+  }
+
+  .studio-side-stack {
+    gap: 10px;
+  }
+
+  .studio-deliverable {
+    grid-template-columns: 10px 24px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    padding: 13px 0;
+  }
+
+  .studio-deliverable-copy strong {
+    font-size: 13px;
+  }
+
+  .studio-deliverable-copy p {
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  .studio-deliverable select,
+  .studio-status-label {
+    grid-column: 3;
+    justify-self: stretch;
+    min-height: 44px;
+    width: 100%;
+    margin-top: 5px;
+    font-size: 12px;
+  }
+
+  .studio-status-label {
+    display: flex;
+    align-items: center;
+    width: fit-content;
+    min-height: 34px;
+  }
+
+  .studio-blueprint-concept,
+  .studio-blueprint-list dd {
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  .studio-blueprint-list dt {
+    font-size: 10px;
+  }
+
+  .studio-dependencies div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+    padding: 10px;
+  }
+
+  .studio-dependencies strong {
+    font-size: 11px;
+  }
+
+  .studio-dependencies span {
+    text-align: left;
+    font-size: 10px;
+  }
+
+  .studio-component-groups {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-component-group {
+    padding: 12px;
+  }
+
+  .studio-component-group > span {
+    font-size: 10px;
+  }
+
+  .studio-component-group strong {
+    font-size: 12px;
+  }
+
+  .studio-component-group p,
+  .studio-component-group small {
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .studio-form-section {
+    display: block;
+    padding: 14px;
+  }
+
+  .studio-step {
+    margin-bottom: 10px;
+  }
+
+  .studio-form-section > div:nth-child(2) {
+    margin-bottom: 13px;
+  }
+
+  .studio-form-section > label,
+  .studio-choice-grid,
+  .studio-capability-grid {
+    grid-column: auto;
+  }
+
+  .studio-form-section > label {
+    margin-top: 12px;
+    font-size: 12px;
+  }
+
+  .studio-form-section input,
+  .studio-form-section textarea {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .studio-choice,
+  .studio-capability {
+    min-height: 48px;
+    padding: 12px;
+    align-items: center;
+  }
+
+  .studio-choice strong,
+  .studio-capability strong {
+    font-size: 12px;
+  }
+
+  .studio-capability small {
+    font-size: 11px;
+  }
+
+  .studio-create-actions .studio-primary {
+    min-height: 46px;
+  }
+
+  .studio-return-control {
+    top: 8px;
+    min-height: 40px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  .studio-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .studio-metrics article:nth-child(2) {
+    border-right: 0;
+  }
+
+  .studio-metrics article:nth-child(3) {
+    border-right: 1px solid var(--studio-border);
+  }
+
+  .studio-lifecycle {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .studio-lifecycle div {
+    min-height: 62px;
+  }
+
+  .studio-product-list {
+    grid-auto-columns: minmax(160px, 72vw);
+  }
+
+  .studio-section-heading {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .studio-section-heading .studio-ghost {
+    min-height: 40px;
+    align-self: stretch;
+  }
+}
