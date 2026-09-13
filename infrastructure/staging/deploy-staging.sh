@@ -60,7 +60,11 @@ echo "Commit: ${COMMIT_SHA}"
 # The runtime image is build-only. The narrow privileged broker launches isolated
 # runtime/helper containers; the unprivileged manager never receives Docker access.
 "${COMPOSE[@]}" --profile workspace-runtime-image build --pull
-"${COMPOSE[@]}" up -d --remove-orphans
+
+# Do not use --remove-orphans here. Issue #39 Gotify is intentionally managed by
+# a separate Compose overlay under the same project name; orphan removal from the
+# application-only compose set would delete that independently managed service.
+"${COMPOSE[@]}" up -d
 
 # Compose may recreate api/web while leaving an unchanged nginx container
 # running. Nginx resolves static proxy_pass service names when its
