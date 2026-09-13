@@ -4,12 +4,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
+from app.product.store import ensure_product_schema
 from app.routes.agent import router as agent_router
 from app.routes.auth import router as auth_router
 from app.routes.git_pull_request import router as git_pull_request_router
 from app.routes.git_remote import router as git_remote_router
 from app.routes.github_app import router as github_app_router
 from app.routes.health import router as health_router
+from app.routes.products import router as products_router
 from app.routes.workspace import router as workspace_router
 from app.security.auth import AuthMiddleware
 from app.security.identity_store import ensure_identity_schema
@@ -33,8 +35,10 @@ async def lifespan(_: FastAPI):
             except AuthStateUnavailableError as exc:
                 raise RuntimeError("Authentication state service unavailable") from exc
             if settings.auth_identity_mode == "database":
-                # Fail closed when durable identity schema cannot initialize.
+                # Multi-user staging treats both identity and Product Control as
+                # durable PostgreSQL state and fails closed if either cannot start.
                 ensure_identity_schema()
+                ensure_product_schema()
         if settings.workspace_ownership_enforced:
             # Fail closed in staging if durable ownership cannot be initialized.
             ensure_workspace_ownership_schema()
@@ -48,8 +52,11 @@ def create_app() -> FastAPI:
     settings = get_settings()
     application = FastAPI(
         title=f"{settings.app_name} API",
-        version="0.1.9",
-        description="Aquila routing, authentication, RBAC and ownership-scoped guarded software engineering runtime for Inzozi Code",
+        version="0.2.0",
+        description=(
+            "Aquila Studio product planning plus guarded engineering runtime: "
+            "product control, AI routing, authentication, RBAC and ownership-scoped workspaces"
+        ),
         lifespan=lifespan,
     )
 
@@ -67,6 +74,7 @@ def create_app() -> FastAPI:
 
     application.include_router(health_router)
     application.include_router(auth_router)
+    application.include_router(products_router)
     application.include_router(agent_router)
     application.include_router(workspace_router)
     application.include_router(git_remote_router)
@@ -76,7 +84,7 @@ def create_app() -> FastAPI:
     @application.get("/")
     def root() -> dict:
         current = get_settings()
-        return {"name": current.app_name, "version": "0.1.9", "agent": "Aquila"}
+        return {"name": current.app_name, "version": "0.2.0", "agent": "Aquila"}
 
     return application
 
