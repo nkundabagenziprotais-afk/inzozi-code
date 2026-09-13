@@ -163,6 +163,19 @@
   margin-right: 198px;
 }
 
+/* Engineering telemetry only has meaning once a solution is active. */
+.inzozi-sync-bar[data-no-active-solution='true'] .inzozi-sync-status,
+.inzozi-sync-bar[data-no-active-solution='true'] .inzozi-sync-details {
+  display: none !important;
+}
+
+.inzozi-sync-bar[data-no-active-solution='true'] .inzozi-sync-product.empty strong {
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
 /* Engineering should visually continue directly from the common shell. */
 .studio-engineering-mode {
   background: #08101d;
