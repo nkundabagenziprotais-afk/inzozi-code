@@ -78,7 +78,9 @@ function normalizeProjectControlHome() {
 
   if (emptyProduct) {
     const emptySolution = emptyProduct.querySelector<HTMLElement>('strong')
-    if (emptySolution) emptySolution.textContent = 'Select a solution'
+    if (emptySolution && emptySolution.textContent?.trim() !== 'Select a solution') {
+      emptySolution.textContent = 'Select a solution'
+    }
     syncBar?.setAttribute('data-no-active-solution', 'true')
   } else {
     syncBar?.removeAttribute('data-no-active-solution')
