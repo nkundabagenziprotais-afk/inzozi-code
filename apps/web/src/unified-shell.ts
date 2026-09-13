@@ -57,6 +57,28 @@ function normalizeLegacyLabels() {
   sessionChip?.setAttribute('aria-label', 'Signed-in Inzozi AI-Coding session')
 }
 
+function normalizeProjectControlHome() {
+  const welcomeCopy = document.querySelector<HTMLElement>('.studio-welcome-copy p')
+  if (welcomeCopy?.textContent?.includes('Aquila Studio turns an idea')) {
+    welcomeCopy.textContent = 'Inzozi AI-Coding turns an idea into a product blueprint, system map, ordered deliverables and a synchronized engineering journey. Technical details remain available inside Engineering Space when you need them.'
+  }
+
+  const foundationHeading = document.querySelector<HTMLElement>('.studio-foundation-note strong')
+  if (foundationHeading?.textContent?.trim() === 'Your existing Engineering Runtime is preserved.') {
+    foundationHeading.textContent = 'Engineering Space is integrated into delivery.'
+  }
+
+  const foundationCopy = document.querySelector<HTMLElement>('.studio-foundation-note p')
+  if (foundationCopy?.textContent?.includes('Secure workspaces, Aquila modes')) {
+    foundationCopy.textContent = 'Plan and govern work here, then continue the selected module and deliverable in Engineering Space. Engineering evidence synchronizes back into Project Control.'
+  }
+
+  const emptySolution = document.querySelector<HTMLElement>('.inzozi-sync-product.empty strong')
+  if (emptySolution?.textContent?.trim() === 'Select a solution in Project Control') {
+    emptySolution.textContent = 'Choose a solution from My Products'
+  }
+}
+
 function enhanceSharedNavigation() {
   const brand = document.querySelector<HTMLElement>('.inzozi-sync-brand')
   if (brand && brand.getAttribute(UNIFIED_HOME_ATTRIBUTE) !== 'true') {
@@ -81,6 +103,7 @@ function enhanceSharedNavigation() {
 function enhanceShell() {
   enhanceSharedNavigation()
   normalizeLegacyLabels()
+  normalizeProjectControlHome()
 }
 
 function activateTarget(target: EventTarget | null) {
