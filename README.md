@@ -1,21 +1,54 @@
-# Inzozi Code / Aquila Studio
+# Inzozi Code
 
-Aquila Studio is evolving from a guarded AI coding workspace into an AI software delivery operating system that keeps product intent, delivery progress, engineering controls and operations connected.
+**Inzozi Code** is an AI-native software engineering and deployment platform for Inzozi Digital. The product is designed to run at `code.inzozidigital.com`, with staging at `code-staging.inzozidigital.com`.
 
-## Product Control v0.2
+The AI engineering agent inside the product is **Aquila**.
 
-Product Control starts from a solution rather than a repository. It maintains a durable product blueprint, technical system components, delivery sequence, dependency map and a separate **Solution Module Roadmap** for business/functional scope.
+## V0.1 goal
 
-Solution modules are intentionally distinct from technical components. Each module can be classified as:
+Prove the safe development loop before production deployment:
 
-- **Must have** — essential for the solution to be viable.
-- **Should have** — important, but can follow the core release.
-- **Good to have** — valuable after higher priorities are secure.
+1. Open/connect a repository.
+2. Inspect project files.
+3. Plan a change.
+4. Edit multiple files.
+5. Run commands in an isolated workspace.
+6. Run tests/builds.
+7. Preview the application.
+8. Show Git diff for review.
 
-Each module independently tracks `planned`, `in_progress`, `blocked` or `complete` status so Product Control can show what is closed, what remains pending, and where attention is required.
+This bootstrap intentionally starts with a **mock Aquila provider**. No production AI API key is required to launch the shell. The provider interface will be connected after the repository and staging environment are established.
 
-The existing Engineering Workspace remains available underneath Product Control for repositories, secure workspaces, code editing, tests, Git approvals, deployments and operational controls.
+## Architecture
 
-## Development
+- Web: React + TypeScript + Vite
+- API: FastAPI + Python 3.12
+- Data: PostgreSQL
+- Queue/cache: Redis
+- Proxy: Nginx
+- Runtime: Docker Compose for the bootstrap
+- Source of truth: GitHub
+- Deployment targets: cPanel / VPS / cloud connectors (later milestones)
 
-See the repository documentation and environment examples for local and staging setup. Protected `main`, reviewable pull requests and separately authorized deployments are part of the project delivery model.
+## Local start
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+Then open:
+
+- Web: http://localhost:8080
+- API health: http://localhost:8000/health
+
+## Repository policy
+
+- Never push product work directly to `main`.
+- Use branches such as `feature/inzozi-code-v0-1`.
+- cPanel is a deployment target, not the source of truth.
+- Production actions require an approval policy and audit trail.
+- AI-generated commands must execute inside isolated workspaces, never directly on the host.
+
+See `docs/architecture.md` and `docs/v0.1-acceptance.md`.
+<!-- Issue20 restricted helper egress E2E: b0fcad8724be448cbed3f78d9c1a04e1 -->
