@@ -6,7 +6,7 @@ ENV_FILE="${ENV_FILE:-/srv/inzozi-code/.env.staging}"
 MODE="${MODE:-http}"
 EXPECTED_COMMIT_SHA="${EXPECTED_COMMIT_SHA:-}"
 
-DOMAIN="code-staging.inzozidigital.com"
+DOMAIN="${DOMAIN:-ai.inzozidigital.com}"
 SITE_NAME="inzozi-code-staging"
 
 AVAILABLE="/etc/nginx/sites-available/${SITE_NAME}"
@@ -110,8 +110,6 @@ else
   [[ "${COOKIE_SECURE}" == "true" ]] ||
     fail "AUTH_COOKIE_SECURE must be true before HTTPS activation"
 
-  # Verify the RUNNING API has loaded the secure-cookie setting before
-  # changing host ingress.
   APP_ROOT="${APP_ROOT}" \
   ENV_FILE="${ENV_FILE}" \
   REQUIRE_SECURE_COOKIE=true \
@@ -197,10 +195,6 @@ install -m 0644 "${TEMPLATE}" "${CANDIDATE}"
 install -m 0644 "${CANDIDATE}" "${AVAILABLE}"
 ln -sfn "${AVAILABLE}" "${ENABLED}"
 
-# Ubuntu's stock site is itself a port-80 default_server. Remove its
-# enabled symlink before validating our candidate so two default servers
-# are never tested together. The running Nginx configuration is unchanged
-# until reload, and rollback restores the previous symlink exactly.
 rm -f "${DEFAULT_ENABLED}"
 
 if ! nginx -t; then
@@ -352,6 +346,7 @@ trap - EXIT
 
 echo "HOST_NGINX_CONFIGURATION_MODE=${MODE}"
 echo "reviewed_commit=${CURRENT_COMMIT_SHA}"
+echo "CANONICAL_STAGING_DOMAIN=${DOMAIN}"
 echo "DEFAULT_VHOST_REJECTS_UNKNOWN_HOSTS=PASS"
 echo "HOST_NGINX_FUNCTIONAL_CHECK=PASS"
 echo "NO_DNS_CHANGE"
