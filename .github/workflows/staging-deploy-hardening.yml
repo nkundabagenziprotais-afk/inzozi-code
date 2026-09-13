@@ -1,0 +1,160 @@
+name: Staging Deploy Hardening
+
+on:
+  pull_request:
+    paths:
+      - 'apps/api/Dockerfile'
+      - 'infrastructure/staging/deploy-staging.sh'
+      - '.github/workflows/staging-deploy-hardening.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/Dockerfile'
+      - 'infrastructure/staging/deploy-staging.sh'
+      - '.github/workflows/staging-deploy-hardening.yml'
+
+jobs:
+  staging-deploy-hardening:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate staging deploy shell syntax
+        run: bash -n infrastructure/staging/deploy-staging.sh
+
+      - name: Prove API image normalizes restrictive source permissions
+        run: |
+          set -euo pipefail
+
+          TMP_API="$(mktemp -d)"
+          trap 'rm -rf "${TMP_API}"' EXIT
+
+          cp -a apps/api/. "${TMP_API}/"
+
+          # Reproduce the private-staging checkout condition deliberately.
+          find "${TMP_API}/app" -type d -exec chmod 0700 {} +
+          find "${TMP_API}/app" -type f -exec chmod 0600 {} +
+
+          docker build \
+            --tag inzozi-code-api:permission-ci \
+            "${TMP_API}"
+
+          RUNTIME_UID="$(
+            docker run \
+              --rm \
+              --network none \
+              --entrypoint id \
+              inzozi-code-api:permission-ci \
+              -u
+          )"
+          test "${RUNTIME_UID}" = '10001'
+
+          APP_DIR_MODE="$(
+            docker run \
+              --rm \
+              --network none \
+              --entrypoint stat \
+              inzozi-code-api:permission-ci \
+              -c '%a' \
+              /app/app
+          )"
+          test "${APP_DIR_MODE}" = '755'
+
+          MAIN_MODE="$(
+            docker run \
+              --rm \
+              --network none \
+              --entrypoint stat \
+              inzozi-code-api:permission-ci \
+              -c '%a' \
+              /app/app/main.py
+          )"
+          test "${MAIN_MODE}" = '644'
+
+          docker run \
+            --rm \
+            --network none \
+            --read-only \
+            --entrypoint python \
+            inzozi-code-api:permission-ci \
+            -c 'from pathlib import Path; data = Path("/app/app/main.py").read_bytes(); assert data'
+
+          echo 'API_RUNTIME_NONROOT_UID=PASS'
+          echo 'API_SOURCE_PERMISSION_NORMALIZATION=PASS'
+          echo 'API_MAIN_READABLE_BY_RUNTIME_USER=PASS'
+
+      - name: Guard deployment against orphan removal
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          deploy = Path(
+              'infrastructure/staging/deploy-staging.sh'
+          ).read_text()
+
+          active_lines = [
+              line.strip()
+              for line in deploy.splitlines()
+              if line.strip()
+              and not line.lstrip().startswith('#')
+          ]
+
+          if any('--remove-orphans' in line for line in active_lines):
+              raise SystemExit(
+                  'STAGING_DEPLOY_ORPHAN_REMOVAL=FAIL'
+              )
+
+          if '"${COMPOSE[@]}" up -d' not in deploy:
+              raise SystemExit(
+                  'STAGING_DEPLOY_RECONCILIATION=FAIL'
+              )
+
+          print('STAGING_DEPLOY_ORPHAN_REMOVAL=DISABLED')
+          print('SEPARATELY_MANAGED_GOTIFY_PRESERVATION_STATIC=PASS')
+          PY
+
+      - name: Functional proof that base reconciliation preserves overlay service
+        run: |
+          set -euo pipefail
+
+          TMP_COMPOSE="$(mktemp -d)"
+          trap 'docker compose -p aquila-orphan-ci -f "${TMP_COMPOSE}/base.yml" -f "${TMP_COMPOSE}/overlay.yml" down -v >/dev/null 2>&1 || true; rm -rf "${TMP_COMPOSE}"' EXIT
+
+          cat > "${TMP_COMPOSE}/base.yml" <<'YAML'
+          services:
+            app:
+              image: alpine:3.20
+              command: ['sh', '-c', 'while true; do sleep 60; done']
+          YAML
+
+          cat > "${TMP_COMPOSE}/overlay.yml" <<'YAML'
+          services:
+            alerts:
+              image: alpine:3.20
+              command: ['sh', '-c', 'while true; do sleep 60; done']
+          YAML
+
+          docker compose \
+            -p aquila-orphan-ci \
+            -f "${TMP_COMPOSE}/base.yml" \
+            -f "${TMP_COMPOSE}/overlay.yml" \
+            up -d
+
+          docker compose \
+            -p aquila-orphan-ci \
+            -f "${TMP_COMPOSE}/base.yml" \
+            up -d
+
+          ALERT_CONTAINER="$(
+            docker ps \
+              --filter 'label=com.docker.compose.project=aquila-orphan-ci' \
+              --filter 'label=com.docker.compose.service=alerts' \
+              --format '{{.ID}}'
+          )"
+
+          test -n "${ALERT_CONTAINER}"
+          test "$(docker inspect --format '{{.State.Running}}' "${ALERT_CONTAINER}")" = 'true'
+
+          echo 'OVERLAY_SERVICE_SURVIVES_BASE_RECONCILIATION=PASS'
