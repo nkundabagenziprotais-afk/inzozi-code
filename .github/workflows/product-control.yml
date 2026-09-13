@@ -7,8 +7,10 @@ on:
       - 'apps/api/app/routes/products.py'
       - 'apps/api/tests/test_product_*.py'
       - 'apps/web/src/StudioShell.tsx'
+      - 'apps/web/src/SolutionModules.tsx'
       - 'apps/web/src/studio-shell.css'
       - 'apps/web/src/studio-shell-refinement.css'
+      - 'apps/web/src/studio-live-review.css'
       - 'apps/web/src/main.tsx'
       - '.github/workflows/product-control.yml'
   push:
@@ -18,8 +20,10 @@ on:
       - 'apps/api/app/routes/products.py'
       - 'apps/api/tests/test_product_*.py'
       - 'apps/web/src/StudioShell.tsx'
+      - 'apps/web/src/SolutionModules.tsx'
       - 'apps/web/src/studio-shell.css'
       - 'apps/web/src/studio-shell-refinement.css'
+      - 'apps/web/src/studio-live-review.css'
       - 'apps/web/src/main.tsx'
       - '.github/workflows/product-control.yml'
 
@@ -71,6 +75,16 @@ jobs:
           grep -Fq 'overflow-y: auto;' src/studio-shell-refinement.css
           grep -Fq 'overscroll-behavior-y: contain;' src/studio-shell-refinement.css
           grep -Fq 'touch-action: pan-x;' src/studio-shell-refinement.css
+      - name: Verify solution module roadmap contract
+        working-directory: apps/web
+        run: |
+          grep -Fq 'SOLUTION DEVELOPMENT' src/SolutionModules.tsx
+          grep -Fq 'Must have' src/SolutionModules.tsx
+          grep -Fq 'Should have' src/SolutionModules.tsx
+          grep -Fq 'Good to have' src/SolutionModules.tsx
+          grep -Fq 'Pending' src/SolutionModules.tsx
+          grep -Fq 'Closed' src/SolutionModules.tsx
+          grep -Fq 'min-height: 44px;' src/studio-live-review.css
       - name: Build Aquila Studio product-control UI
         working-directory: apps/web
         run: npm run build

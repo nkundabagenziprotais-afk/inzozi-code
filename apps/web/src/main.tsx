@@ -10,6 +10,7 @@ import './repository-history.css'
 import './auth.css'
 import './studio-shell.css'
 import './studio-shell-refinement.css'
+import './studio-live-review.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

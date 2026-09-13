@@ -12,6 +12,7 @@ from app.core.config import get_settings
 
 PRODUCT_STATUSES = frozenset({"planning", "active", "paused", "completed", "archived"})
 WORK_STATUSES = frozenset({"planned", "in_progress", "blocked", "complete"})
+MODULE_PRIORITIES = frozenset({"must_have", "should_have", "good_to_have"})
 
 
 class ProductStoreError(RuntimeError):
@@ -100,6 +101,34 @@ def ensure_product_schema() -> None:
         )
         cursor.execute(
             """
+            CREATE TABLE IF NOT EXISTS aquila_product_modules (
+                module_id UUID PRIMARY KEY,
+                product_id UUID NOT NULL REFERENCES aquila_products(product_id) ON DELETE CASCADE,
+                sequence INTEGER NOT NULL,
+                name VARCHAR(160) NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                priority VARCHAR(20) NOT NULL DEFAULT 'must_have',
+                status VARCHAR(20) NOT NULL DEFAULT 'planned',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT aquila_module_priority_check
+                    CHECK (priority IN ('must_have', 'should_have', 'good_to_have')),
+                CONSTRAINT aquila_module_status_check
+                    CHECK (status IN ('planned', 'in_progress', 'blocked', 'complete')),
+                CONSTRAINT aquila_module_sequence_positive CHECK (sequence > 0),
+                CONSTRAINT aquila_module_sequence_unique UNIQUE (product_id, sequence),
+                CONSTRAINT aquila_module_name_unique UNIQUE (product_id, name)
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS aquila_modules_product_priority_sequence_idx
+            ON aquila_product_modules (product_id, priority, sequence)
+            """
+        )
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS aquila_product_deliverables (
                 deliverable_id UUID PRIMARY KEY,
                 product_id UUID NOT NULL REFERENCES aquila_products(product_id) ON DELETE CASCADE,
@@ -160,6 +189,37 @@ def _progress(deliverables: list[dict[str, Any]]) -> int:
     return round((complete / len(deliverables)) * 100)
 
 
+def _module_progress(modules: list[dict[str, Any]]) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "total": len(modules),
+        "complete": 0,
+        "pending": 0,
+        "blocked": 0,
+        "progress_percent": 0,
+        "priorities": {
+            "must_have": {"total": 0, "complete": 0},
+            "should_have": {"total": 0, "complete": 0},
+            "good_to_have": {"total": 0, "complete": 0},
+        },
+    }
+    for module in modules:
+        priority = module.get("priority")
+        status = module.get("status")
+        if priority in summary["priorities"]:
+            summary["priorities"][priority]["total"] += 1
+        if status == "complete":
+            summary["complete"] += 1
+            if priority in summary["priorities"]:
+                summary["priorities"][priority]["complete"] += 1
+        else:
+            summary["pending"] += 1
+        if status == "blocked":
+            summary["blocked"] += 1
+    if summary["total"]:
+        summary["progress_percent"] = round((summary["complete"] / summary["total"]) * 100)
+    return summary
+
+
 def create_product(
     *,
     organization_id: str,
@@ -174,6 +234,7 @@ def create_product(
     components: list[dict[str, Any]],
     deliverables: list[dict[str, Any]],
     dependencies: list[dict[str, Any]],
+    modules: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     product_id = str(uuid4())
     component_ids = {item["component_key"]: str(uuid4()) for item in components}
@@ -222,6 +283,27 @@ def create_product(
                         component.get("status", "planned"),
                     ),
                 )
+            for index, module in enumerate(modules or [], start=1):
+                priority = module.get("priority", "must_have")
+                status = module.get("status", "planned")
+                if priority not in MODULE_PRIORITIES or status not in WORK_STATUSES:
+                    raise ProductValidationError("Invalid solution module priority or status")
+                cursor.execute(
+                    """
+                    INSERT INTO aquila_product_modules (
+                        module_id, product_id, sequence, name, description, priority, status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        str(uuid4()),
+                        product_id,
+                        module.get("sequence", index),
+                        module["name"].strip(),
+                        module.get("description", "").strip(),
+                        priority,
+                        status,
+                    ),
+                )
             for deliverable in deliverables:
                 component_key = deliverable.get("component_key")
                 cursor.execute(
@@ -264,6 +346,8 @@ def create_product(
                     ),
                 )
             connection.commit()
+    except ProductValidationError:
+        raise
     except ProductStoreError:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -358,6 +442,18 @@ def get_product_snapshot(*, product_id: str, organization_id: str) -> dict[str, 
 
             cursor.execute(
                 """
+                SELECT module_id, sequence, name, description, priority, status,
+                       created_at, updated_at
+                FROM aquila_product_modules
+                WHERE product_id = %s
+                ORDER BY sequence, created_at
+                """,
+                (product_id,),
+            )
+            modules = cursor.fetchall()
+
+            cursor.execute(
+                """
                 SELECT deliverable_id, component_id, sequence, title, description,
                        status, created_at, updated_at
                 FROM aquila_product_deliverables
@@ -393,14 +489,173 @@ def get_product_snapshot(*, product_id: str, organization_id: str) -> dict[str, 
     except Exception as exc:  # noqa: BLE001
         raise ProductStoreError("Unable to read product") from exc
 
+    serialized_modules = [_serialize_row(row) for row in modules]
     serialized_deliverables = [_serialize_row(row) for row in deliverables]
     payload = _serialize_row(product)
     payload["blueprint"] = _serialize_row(blueprint)
     payload["components"] = [_serialize_row(row) for row in components]
+    payload["modules"] = serialized_modules
+    payload["module_progress"] = _module_progress(serialized_modules)
     payload["deliverables"] = serialized_deliverables
     payload["dependencies"] = [_serialize_row(row) for row in dependencies]
     payload["progress_percent"] = _progress(serialized_deliverables)
     return payload
+
+
+def _assert_product_access(cursor, *, product_id: str, organization_id: str) -> None:
+    cursor.execute(
+        "SELECT 1 FROM aquila_products WHERE product_id = %s AND organization_id = %s",
+        (product_id, organization_id),
+    )
+    if not cursor.fetchone():
+        raise ProductNotFoundError("Product not found")
+
+
+def create_module(
+    *,
+    product_id: str,
+    organization_id: str,
+    name: str,
+    description: str,
+    priority: str,
+) -> dict[str, Any]:
+    name = name.strip()
+    description = description.strip()
+    if not name:
+        raise ProductValidationError("Module name is required")
+    if priority not in MODULE_PRIORITIES:
+        raise ProductValidationError("Invalid module priority")
+    try:
+        with _connect(autocommit=False) as connection, connection.cursor() as cursor:
+            _assert_product_access(cursor, product_id=product_id, organization_id=organization_id)
+            cursor.execute(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence FROM aquila_product_modules WHERE product_id = %s",
+                (product_id,),
+            )
+            sequence = int(cursor.fetchone()["next_sequence"])
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO aquila_product_modules (
+                        module_id, product_id, sequence, name, description, priority, status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, 'planned')
+                    """,
+                    (str(uuid4()), product_id, sequence, name, description, priority),
+                )
+            except psycopg.errors.UniqueViolation as exc:
+                raise ProductValidationError("A module with this name already exists") from exc
+            cursor.execute(
+                "UPDATE aquila_products SET updated_at = NOW() WHERE product_id = %s",
+                (product_id,),
+            )
+            connection.commit()
+    except (ProductNotFoundError, ProductValidationError):
+        raise
+    except ProductStoreError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise ProductStoreError("Unable to create module") from exc
+    return get_product_snapshot(product_id=product_id, organization_id=organization_id)
+
+
+def update_module(
+    *,
+    product_id: str,
+    module_id: str,
+    organization_id: str,
+    name: str | None = None,
+    description: str | None = None,
+    priority: str | None = None,
+    status: str | None = None,
+) -> dict[str, Any]:
+    if priority is not None and priority not in MODULE_PRIORITIES:
+        raise ProductValidationError("Invalid module priority")
+    if status is not None and status not in WORK_STATUSES:
+        raise ProductValidationError("Invalid module status")
+    updates: list[str] = []
+    values: list[Any] = []
+    if name is not None:
+        clean_name = name.strip()
+        if not clean_name:
+            raise ProductValidationError("Module name is required")
+        updates.append("name = %s")
+        values.append(clean_name)
+    if description is not None:
+        updates.append("description = %s")
+        values.append(description.strip())
+    if priority is not None:
+        updates.append("priority = %s")
+        values.append(priority)
+    if status is not None:
+        updates.append("status = %s")
+        values.append(status)
+    if not updates:
+        raise ProductValidationError("No module changes supplied")
+    updates.append("updated_at = NOW()")
+    values.extend([module_id, product_id, organization_id])
+    try:
+        with _connect(autocommit=False) as connection, connection.cursor() as cursor:
+            try:
+                cursor.execute(
+                    f"""
+                    UPDATE aquila_product_modules m
+                    SET {', '.join(updates)}
+                    FROM aquila_products p
+                    WHERE m.module_id = %s
+                      AND m.product_id = %s
+                      AND p.product_id = m.product_id
+                      AND p.organization_id = %s
+                    RETURNING m.module_id
+                    """,
+                    values,
+                )
+            except psycopg.errors.UniqueViolation as exc:
+                raise ProductValidationError("A module with this name already exists") from exc
+            if not cursor.fetchone():
+                raise ProductNotFoundError("Module not found")
+            cursor.execute(
+                "UPDATE aquila_products SET updated_at = NOW() WHERE product_id = %s",
+                (product_id,),
+            )
+            connection.commit()
+    except (ProductNotFoundError, ProductValidationError):
+        raise
+    except ProductStoreError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise ProductStoreError("Unable to update module") from exc
+    return get_product_snapshot(product_id=product_id, organization_id=organization_id)
+
+
+def delete_module(*, product_id: str, module_id: str, organization_id: str) -> dict[str, Any]:
+    try:
+        with _connect(autocommit=False) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                DELETE FROM aquila_product_modules m
+                USING aquila_products p
+                WHERE m.module_id = %s
+                  AND m.product_id = %s
+                  AND p.product_id = m.product_id
+                  AND p.organization_id = %s
+                RETURNING m.module_id
+                """,
+                (module_id, product_id, organization_id),
+            )
+            if not cursor.fetchone():
+                raise ProductNotFoundError("Module not found")
+            cursor.execute(
+                "UPDATE aquila_products SET updated_at = NOW() WHERE product_id = %s",
+                (product_id,),
+            )
+            connection.commit()
+    except ProductNotFoundError:
+        raise
+    except ProductStoreError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise ProductStoreError("Unable to delete module") from exc
+    return get_product_snapshot(product_id=product_id, organization_id=organization_id)
 
 
 def update_deliverable_status(

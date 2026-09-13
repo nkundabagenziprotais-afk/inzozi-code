@@ -11,11 +11,14 @@ from app.product.store import (
     ProductNotFoundError,
     ProductStoreError,
     ProductValidationError,
+    create_module,
     create_product,
+    delete_module,
     ensure_product_schema,
     get_product_snapshot,
     list_products,
     update_deliverable_status,
+    update_module,
 )
 from app.security.auth import AuthPrincipal, require_permission
 
@@ -42,6 +45,7 @@ CapabilityTarget = Literal[
     "monitoring",
 ]
 WorkStatus = Literal["planned", "in_progress", "blocked", "complete"]
+ModulePriority = Literal["must_have", "should_have", "good_to_have"]
 
 PLATFORM_LABELS: dict[str, str] = {
     "web": "Web Application",
@@ -55,6 +59,12 @@ PLATFORM_LABELS: dict[str, str] = {
 }
 
 
+class ModuleSeedRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    description: str = Field(default="", max_length=2000)
+    priority: ModulePriority = "must_have"
+
+
 class ProductCreateRequest(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     concept: str = Field(min_length=20, max_length=8000)
@@ -64,10 +74,24 @@ class ProductCreateRequest(BaseModel):
         default_factory=lambda: ["database", "internal_api", "documentation", "monitoring"]
     )
     constraints: list[str] = Field(default_factory=list, max_length=30)
+    modules: list[ModuleSeedRequest] = Field(default_factory=list, max_length=60)
 
 
 class DeliverableStatusRequest(BaseModel):
     status: WorkStatus
+
+
+class ModuleCreateRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    description: str = Field(default="", max_length=2000)
+    priority: ModulePriority = "must_have"
+
+
+class ModuleUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=160)
+    description: str | None = Field(default=None, max_length=2000)
+    priority: ModulePriority | None = None
+    status: WorkStatus | None = None
 
 
 def _principal(request: Request) -> AuthPrincipal:
@@ -217,6 +241,24 @@ def build_initial_product_plan(payload: ProductCreateRequest) -> dict[str, list[
             )
         )
 
+    modules: list[dict] = []
+    seen_modules: set[str] = set()
+    for index, module in enumerate(payload.modules, start=1):
+        clean_name = module.name.strip()
+        normalized = clean_name.casefold()
+        if not clean_name or normalized in seen_modules:
+            continue
+        seen_modules.add(normalized)
+        modules.append(
+            {
+                "sequence": index,
+                "name": clean_name,
+                "description": module.description.strip(),
+                "priority": module.priority,
+                "status": "planned",
+            }
+        )
+
     deliverables: list[dict] = [
         {
             "sequence": 1,
@@ -318,6 +360,7 @@ def build_initial_product_plan(payload: ProductCreateRequest) -> dict[str, list[
 
     return {
         "components": components,
+        "modules": modules,
         "deliverables": deliverables,
         "dependencies": dependencies,
     }
@@ -358,9 +401,12 @@ async def new_product(payload: ProductCreateRequest, request: Request) -> dict:
             capabilities=list(dict.fromkeys(payload.capabilities)),
             constraints=[value.strip() for value in payload.constraints if value.strip()],
             components=plan["components"],
+            modules=plan["modules"],
             deliverables=plan["deliverables"],
             dependencies=plan["dependencies"],
         )
+    except ProductValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ProductStoreError as exc:
         raise HTTPException(status_code=503, detail="Unable to create product") from exc
 
@@ -380,6 +426,75 @@ async def product(product_id: str, request: Request) -> dict:
         raise HTTPException(status_code=404, detail="Product not found") from exc
     except ProductStoreError as exc:
         raise HTTPException(status_code=503, detail="Product store unavailable") from exc
+
+
+@router.post("/{product_id}/modules", status_code=201)
+async def add_module(product_id: str, payload: ModuleCreateRequest, request: Request) -> dict:
+    principal = _principal(request)
+    require_permission(request, "workspace:edit")
+    await _ensure_store()
+    try:
+        return await run_in_threadpool(
+            create_module,
+            product_id=product_id,
+            organization_id=principal.organization_id,
+            name=payload.name,
+            description=payload.description,
+            priority=payload.priority,
+        )
+    except ProductNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Product not found") from exc
+    except ProductValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ProductStoreError as exc:
+        raise HTTPException(status_code=503, detail="Unable to create module") from exc
+
+
+@router.patch("/{product_id}/modules/{module_id}")
+async def change_module(
+    product_id: str,
+    module_id: str,
+    payload: ModuleUpdateRequest,
+    request: Request,
+) -> dict:
+    principal = _principal(request)
+    require_permission(request, "workspace:edit")
+    await _ensure_store()
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=400, detail="No module changes supplied")
+    try:
+        return await run_in_threadpool(
+            update_module,
+            product_id=product_id,
+            module_id=module_id,
+            organization_id=principal.organization_id,
+            **changes,
+        )
+    except ProductNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Module not found") from exc
+    except ProductValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ProductStoreError as exc:
+        raise HTTPException(status_code=503, detail="Unable to update module") from exc
+
+
+@router.delete("/{product_id}/modules/{module_id}")
+async def remove_module(product_id: str, module_id: str, request: Request) -> dict:
+    principal = _principal(request)
+    require_permission(request, "workspace:edit")
+    await _ensure_store()
+    try:
+        return await run_in_threadpool(
+            delete_module,
+            product_id=product_id,
+            module_id=module_id,
+            organization_id=principal.organization_id,
+        )
+    except ProductNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Module not found") from exc
+    except ProductStoreError as exc:
+        raise HTTPException(status_code=503, detail="Unable to delete module") from exc
 
 
 @router.patch("/{product_id}/deliverables/{deliverable_id}")

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import App from './App'
+import SolutionModules, { ModuleProgress, ProductModule } from './SolutionModules'
 
 type StudioView = 'products' | 'engineering'
 type WorkStatus = 'planned' | 'in_progress' | 'blocked' | 'complete'
@@ -56,6 +57,8 @@ type Dependency = {
 type ProductSnapshot = ProductSummary & {
   blueprint: Blueprint
   components: ProductComponent[]
+  modules?: ProductModule[]
+  module_progress?: ModuleProgress
   deliverables: Deliverable[]
   dependencies: Dependency[]
 }
@@ -128,6 +131,10 @@ function pretty(value: string) {
   return value
     .replaceAll('_', ' ')
     .replace(/\b\w/g, (match) => match.toUpperCase())
+}
+
+function platformLabel(value: string) {
+  return PLATFORM_OPTIONS.find(([option]) => option === value)?.[1] ?? pretty(value)
 }
 
 function updatedLabel(value: string) {
@@ -299,7 +306,7 @@ function ProductCreatePanel({
         <div className="studio-create-actions">
           <div>
             <strong>Aquila will create:</strong>
-            <span>Blueprint · System components · Delivery sequence · Initial dependency map</span>
+            <span>Blueprint · Module roadmap · System components · Delivery sequence · Initial dependency map</span>
           </div>
           <button
             className="studio-primary"
@@ -316,12 +323,16 @@ function ProductCreatePanel({
 function ProjectControlCenter({
   product,
   canEdit,
+  savingDeliverableId,
   onStatusChange,
+  onModulesChanged,
   onOpenEngineering,
 }: {
   product: ProductSnapshot
   canEdit: boolean
+  savingDeliverableId: string | null
   onStatusChange: (deliverable: Deliverable, status: WorkStatus) => Promise<void>
+  onModulesChanged: () => Promise<void>
   onOpenEngineering: () => void
 }) {
   const grouped = useMemo(() => {
@@ -333,6 +344,32 @@ function ProjectControlCenter({
     }
     return Array.from(groups.entries())
   }, [product.components])
+
+  const dependencyGroups = useMemo(() => {
+    const groups = new Map<string, {
+      upstreamName: string
+      relationship: string
+      downstreamNames: string[]
+    }>()
+
+    for (const dependency of product.dependencies) {
+      const key = `${dependency.upstream_name}::${dependency.relationship}`
+      const existing = groups.get(key)
+      if (existing) {
+        if (!existing.downstreamNames.includes(dependency.downstream_name)) {
+          existing.downstreamNames.push(dependency.downstream_name)
+        }
+        continue
+      }
+      groups.set(key, {
+        upstreamName: dependency.upstream_name,
+        relationship: dependency.relationship,
+        downstreamNames: [dependency.downstream_name],
+      })
+    }
+
+    return Array.from(groups.values())
+  }, [product.dependencies])
 
   const completed = product.deliverables.filter((item) => item.status === 'complete').length
   const blocked = product.deliverables.filter((item) => item.status === 'blocked').length
@@ -347,7 +384,7 @@ function ProjectControlCenter({
           <h1>{product.name}</h1>
           <p>{product.summary}</p>
           <div className="studio-tags">
-            {product.blueprint.platforms.map((item) => <span key={item}>{pretty(item)}</span>)}
+            {product.blueprint.platforms.map((item) => <span key={item}>{platformLabel(item)}</span>)}
           </div>
         </div>
         <div className="studio-hero-actions">
@@ -368,6 +405,14 @@ function ProjectControlCenter({
         <div className="studio-progress-track"><span style={{ width: `${product.progress_percent}%` }} /></div>
       </section>
 
+      <SolutionModules
+        productId={product.product_id}
+        modules={product.modules ?? []}
+        progress={product.module_progress}
+        canEdit={canEdit}
+        onChanged={onModulesChanged}
+      />
+
       <div className="studio-control-grid">
         <section className="studio-card studio-roadmap">
           <div className="studio-card-heading">
@@ -384,16 +429,21 @@ function ProjectControlCenter({
                   <p>{item.description}</p>
                 </div>
                 {canEdit ? (
-                  <select
-                    value={item.status}
-                    onChange={(event) => void onStatusChange(item, event.target.value as WorkStatus)}
-                    aria-label={`Status for ${item.title}`}
-                  >
-                    <option value="planned">Planned</option>
-                    <option value="in_progress">In progress</option>
-                    <option value="blocked">Blocked</option>
-                    <option value="complete">Complete</option>
-                  </select>
+                  <div className="studio-status-control">
+                    <select
+                      value={item.status}
+                      disabled={Boolean(savingDeliverableId)}
+                      aria-busy={savingDeliverableId === item.deliverable_id}
+                      onChange={(event) => void onStatusChange(item, event.target.value as WorkStatus)}
+                      aria-label={`Status for ${item.title}`}
+                    >
+                      <option value="planned">Planned</option>
+                      <option value="in_progress">In progress</option>
+                      <option value="blocked">Blocked</option>
+                      <option value="complete">Complete</option>
+                    </select>
+                    {savingDeliverableId === item.deliverable_id && <small role="status">Saving…</small>}
+                  </div>
                 ) : <span className={`studio-status-label status-${item.status}`}>{pretty(item.status)}</span>}
               </article>
             ))}
@@ -406,7 +456,7 @@ function ProjectControlCenter({
             <p className="studio-blueprint-concept">{product.blueprint.concept}</p>
             <dl className="studio-blueprint-list">
               <div><dt>Target users</dt><dd>{product.blueprint.target_users.length ? product.blueprint.target_users.join(', ') : 'To be refined'}</dd></div>
-              <div><dt>Platforms</dt><dd>{product.blueprint.platforms.map(pretty).join(', ')}</dd></div>
+              <div><dt>Platforms</dt><dd>{product.blueprint.platforms.map(platformLabel).join(', ')}</dd></div>
               <div><dt>Capabilities</dt><dd>{product.blueprint.capabilities.map(pretty).join(', ')}</dd></div>
               {product.blueprint.constraints.length > 0 && <div><dt>Constraints</dt><dd>{product.blueprint.constraints.join('; ')}</dd></div>}
             </dl>
@@ -414,15 +464,19 @@ function ProjectControlCenter({
 
           <section className="studio-card">
             <div className="studio-card-heading"><div><span className="studio-eyebrow">CHANGE SAFETY</span><h2>Dependencies</h2></div><small>{product.dependencies.length} mapped</small></div>
-            <div className="studio-dependencies">
-              {product.dependencies.slice(0, 8).map((item) => (
-                <div key={item.dependency_id}>
-                  <strong>{item.upstream_name}</strong>
-                  <span>→ {item.relationship} →</span>
-                  <strong>{item.downstream_name}</strong>
-                </div>
+            <div className="studio-dependencies studio-dependency-groups">
+              {dependencyGroups.slice(0, 5).map((group) => (
+                <article className="studio-dependency-group" key={`${group.upstreamName}:${group.relationship}`}>
+                  <div className="studio-dependency-group-heading">
+                    <strong>{group.upstreamName}</strong>
+                    <span>→ {group.relationship}</span>
+                  </div>
+                  <p>{group.downstreamNames.join(', ')}</p>
+                </article>
               ))}
-              {product.dependencies.length > 8 && <small>+ {product.dependencies.length - 8} additional dependency relationships</small>}
+              {dependencyGroups.length > 5 && (
+                <small>+ {dependencyGroups.length - 5} additional dependency groups · {product.dependencies.length} relationships total</small>
+              )}
             </div>
           </section>
         </aside>
@@ -460,6 +514,7 @@ export default function StudioShell() {
   const [creating, setCreating] = useState(false)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
+  const [savingDeliverableId, setSavingDeliverableId] = useState<string | null>(null)
 
   const canEdit = Boolean(session?.permissions.includes('workspace:edit'))
 
@@ -504,9 +559,23 @@ export default function StudioShell() {
     setCreating(false)
   }
 
+  async function refreshSelectedProduct() {
+    if (!selected) return
+    try {
+      const refreshed = await api<ProductSnapshot>(`/api/v1/products/${selected.product_id}`)
+      setSelected(refreshed)
+      setProducts((current) => current.map((item) => (
+        item.product_id === refreshed.product_id ? refreshed : item
+      )))
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to refresh product.')
+    }
+  }
+
   async function updateStatus(deliverable: Deliverable, status: WorkStatus) {
-    if (!selected || deliverable.status === status) return
+    if (!selected || deliverable.status === status || savingDeliverableId) return
     setMessage('')
+    setSavingDeliverableId(deliverable.deliverable_id)
     try {
       const refreshed = await api<ProductSnapshot>(
         `/api/v1/products/${selected.product_id}/deliverables/${deliverable.deliverable_id}`,
@@ -522,6 +591,8 @@ export default function StudioShell() {
       )))
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to update deliverable.')
+    } finally {
+      setSavingDeliverableId(null)
     }
   }
 
@@ -587,7 +658,9 @@ export default function StudioShell() {
             <ProjectControlCenter
               product={selected}
               canEdit={canEdit}
+              savingDeliverableId={savingDeliverableId}
               onStatusChange={updateStatus}
+              onModulesChanged={refreshSelectedProduct}
               onOpenEngineering={() => setView('engineering')}
             />
           ) : (
