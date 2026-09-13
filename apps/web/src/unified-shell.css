@@ -191,14 +191,9 @@
   border-color: rgba(99, 214, 160, 0.35) !important;
 }
 
-/* The legacy sidebar shortcut is secondary now that the common header owns nav. */
-.studio-sidebar-footer {
-  opacity: 0.78;
-}
-
-.studio-sidebar-footer > button {
-  border-color: rgba(148, 163, 184, 0.16) !important;
-  background: rgba(15, 27, 45, 0.72) !important;
+/* The common header is the sole route into Engineering Space. */
+.inzozi-delivery-body .studio-sidebar-footer {
+  display: none !important;
 }
 
 @media (max-width: 1280px) {
