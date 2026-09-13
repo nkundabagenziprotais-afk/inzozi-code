@@ -58,12 +58,53 @@ type EngineeringEvent = {
   created_at: string
 }
 
+type ModuleDelivery = {
+  module_id: string
+  sequence: number
+  name: string
+  priority: string
+  status: WorkStatus
+  derived_status: WorkStatus
+  deliverable_total: number
+  deliverable_complete: number
+  deliverable_blocked: number
+  deliverable_in_progress: number
+  progress_percent: number
+}
+
+type DeliveryDeliverable = Deliverable & {
+  sequence: number
+  description: string
+  module_id?: string | null
+  module_name?: string | null
+}
+
+type ModuleDeliverySummary = {
+  modules_total: number
+  modules_complete: number
+  linked_deliverables_total: number
+  linked_deliverables_complete: number
+  linked_deliverables_blocked: number
+  progress_percent: number
+}
+
+type ModuleProposal = {
+  name: string
+  description: string
+  priority: 'must_have' | 'should_have' | 'good_to_have'
+  proposal_state: 'review_only'
+}
+
 type EngineeringSummary = {
   binding: EngineeringBinding | null
   recent_events: EngineeringEvent[]
   evidence_count: number
   last_activity_at: string | null
   sync_health: 'not_linked' | 'ready' | 'active' | 'attention'
+  module_delivery: ModuleDelivery[]
+  delivery_deliverables: DeliveryDeliverable[]
+  module_delivery_summary: ModuleDeliverySummary
+  module_proposals: ModuleProposal[]
 }
 
 type Session = {
@@ -164,14 +205,12 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
       if (!response.ok) throw new Error(`Synchronization unavailable (${response.status})`)
       const payload = await response.json() as EngineeringSummary
       setSummary(payload)
-      if (payload.binding) {
-        const nextModule = payload.binding.module_id ?? ''
-        const nextDeliverable = payload.binding.deliverable_id ?? ''
-        moduleIdRef.current = nextModule
-        deliverableIdRef.current = nextDeliverable
-        setModuleId(nextModule)
-        setDeliverableId(nextDeliverable)
-      }
+      const nextModule = payload.binding?.module_id ?? ''
+      const nextDeliverable = payload.binding?.deliverable_id ?? ''
+      moduleIdRef.current = nextModule
+      deliverableIdRef.current = nextDeliverable
+      setModuleId(nextModule)
+      setDeliverableId(nextDeliverable)
       setMessage('')
       return payload
     } catch (error) {
@@ -218,6 +257,35 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
     }
   }, [rawFetch])
 
+  const assignDeliverable = useCallback(async (
+    productId: string,
+    targetDeliverableId: string,
+    targetModuleId: string | null,
+  ) => {
+    try {
+      const response = await rawFetch(
+        `/api/v1/products/${productId}/engineering/deliverables/${targetDeliverableId}/module`,
+        {
+          method: 'PUT',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ module_id: targetModuleId }),
+        },
+      )
+      if (!response.ok) {
+        const body = await responseJson<ApiError>(response)
+        throw new Error(body?.detail ?? `Unable to assign deliverable (${response.status})`)
+      }
+      const payload = await response.json() as EngineeringSummary
+      setSummary(payload)
+      setMessage('')
+      return payload
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to assign deliverable to module.')
+      return null
+    }
+  }, [rawFetch])
+
   const recordEvent = useCallback(async (
     productId: string,
     eventType: string,
@@ -255,7 +323,15 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
   const captureProductResponse = useCallback(async (response: Response) => {
     const payload = await responseJson<ProductSnapshot>(response)
     if (!payload?.product_id || !Array.isArray(payload.deliverables)) return
+    const changedProduct = activeProductRef.current?.product_id !== payload.product_id
     syncProductState(payload)
+    if (changedProduct) {
+      moduleIdRef.current = ''
+      deliverableIdRef.current = ''
+      setModuleId('')
+      setDeliverableId('')
+      setSummary(null)
+    }
     await loadEngineeringSummary(payload.product_id)
   }, [loadEngineeringSummary])
 
@@ -452,10 +528,25 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
       if (!button) return
       const text = button.textContent?.trim() ?? ''
 
-      if (text.includes('Engineering Workspace') || text.includes('Open Engineering Workspace')) {
+      if (
+        text.includes('Engineering Workspace')
+        || text.includes('Open Engineering Workspace')
+        || text.includes('Continue in Engineering Space')
+      ) {
+        const product = activeProductRef.current
+        if (product && (!moduleIdRef.current || !deliverableIdRef.current)) {
+          event.preventDefault()
+          event.stopImmediatePropagation()
+          setMessage(
+            !moduleIdRef.current
+              ? 'Select an intended module before continuing in Engineering Space.'
+              : 'Select a deliverable for this module before continuing in Engineering Space.',
+          )
+          return
+        }
+
         surfaceRef.current = 'engineering'
         setSurface('engineering')
-        const product = activeProductRef.current
         if (product) {
           void updateBinding(product.product_id, {
             module_id: moduleIdRef.current || null,
@@ -464,7 +555,7 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
             product.product_id,
             'engineering_opened',
             'info',
-            'Engineering Space opened from Product Control.',
+            'Engineering Space opened from Project Control.',
             {},
           ))
         }
@@ -497,19 +588,64 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
   }, [loadEngineeringSummary, recordEvent, refreshProduct, updateBinding])
 
   async function changeModule(value: string) {
+    const product = activeProductRef.current
     moduleIdRef.current = value
     setModuleId(value)
-    const product = activeProductRef.current
+
+    const currentDeliverable = summary?.delivery_deliverables.find(
+      (item) => item.deliverable_id === deliverableIdRef.current,
+    )
+    const keepDeliverable = Boolean(value && currentDeliverable?.module_id === value)
+    const nextDeliverable = keepDeliverable ? deliverableIdRef.current : ''
+    deliverableIdRef.current = nextDeliverable
+    setDeliverableId(nextDeliverable)
+
     if (!product || !canEdit) return
-    await updateBinding(product.product_id, { module_id: value || null })
+    await updateBinding(product.product_id, {
+      module_id: value || null,
+      deliverable_id: nextDeliverable || null,
+    })
   }
 
   async function changeDeliverable(value: string) {
-    deliverableIdRef.current = value
-    setDeliverableId(value)
     const product = activeProductRef.current
     if (!product || !canEdit) return
-    await updateBinding(product.product_id, { deliverable_id: value || null })
+
+    if (!value) {
+      deliverableIdRef.current = ''
+      setDeliverableId('')
+      await updateBinding(product.product_id, {
+        module_id: moduleIdRef.current || null,
+        deliverable_id: null,
+      })
+      return
+    }
+
+    if (!moduleIdRef.current) {
+      setMessage('Select an intended module before choosing a deliverable.')
+      return
+    }
+
+    const delivery = summary?.delivery_deliverables.find((item) => item.deliverable_id === value)
+    if (!delivery) {
+      setMessage('Deliverable context is not available. Refresh Product Control and try again.')
+      return
+    }
+
+    if (!delivery.module_id) {
+      const assigned = await assignDeliverable(product.product_id, value, moduleIdRef.current)
+      if (!assigned) return
+    } else if (delivery.module_id !== moduleIdRef.current) {
+      setMessage(`This deliverable belongs to ${delivery.module_name ?? 'another module'}.`)
+      return
+    }
+
+    deliverableIdRef.current = value
+    setDeliverableId(value)
+    await updateBinding(product.product_id, {
+      module_id: moduleIdRef.current,
+      deliverable_id: value,
+    })
   }
 
   const healthLabel = summary?.sync_health === 'attention'
@@ -519,6 +655,11 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
       : summary?.sync_health === 'ready'
         ? 'Ready'
         : 'Not linked'
+
+  const moduleDelivery = summary?.module_delivery ?? []
+  const selectedModuleDelivery = moduleDelivery.find((item) => item.module_id === moduleId)
+  const moduleDeliverables = (summary?.delivery_deliverables ?? []).filter((item) => item.module_id === moduleId)
+  const unassignedDeliverables = (summary?.delivery_deliverables ?? []).filter((item) => !item.module_id)
 
   return (
     <div className="inzozi-delivery-shell">
@@ -549,12 +690,22 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
                 <select
                   value={moduleId}
                   onChange={(event) => void changeModule(event.target.value)}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !(activeProduct.modules?.length)}
                 >
-                  <option value="">General engineering</option>
-                  {(activeProduct.modules ?? []).map((module) => (
-                    <option value={module.module_id} key={module.module_id}>{module.name}</option>
-                  ))}
+                  <option value="">
+                    {activeProduct.modules?.length ? 'Select module' : 'No intended modules yet'}
+                  </option>
+                  {(activeProduct.modules ?? []).map((module) => {
+                    const delivery = moduleDelivery.find((item) => item.module_id === module.module_id)
+                    const suffix = delivery?.deliverable_total
+                      ? ` · ${delivery.deliverable_complete}/${delivery.deliverable_total}`
+                      : ''
+                    return (
+                      <option value={module.module_id} key={module.module_id}>
+                        {module.name}{suffix}
+                      </option>
+                    )
+                  })}
                 </select>
               </label>
               <label>
@@ -562,14 +713,27 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
                 <select
                   value={deliverableId}
                   onChange={(event) => void changeDeliverable(event.target.value)}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !moduleId}
                 >
-                  <option value="">No specific deliverable</option>
-                  {activeProduct.deliverables.map((deliverable) => (
-                    <option value={deliverable.deliverable_id} key={deliverable.deliverable_id}>
-                      {deliverable.title} · {eventLabel(deliverable.status)}
-                    </option>
-                  ))}
+                  <option value="">{moduleId ? 'Select deliverable' : 'Select module first'}</option>
+                  {moduleId && moduleDeliverables.length > 0 && (
+                    <optgroup label={`${selectedModuleDelivery?.name ?? 'Selected module'} deliverables`}>
+                      {moduleDeliverables.map((deliverable) => (
+                        <option value={deliverable.deliverable_id} key={deliverable.deliverable_id}>
+                          {deliverable.title} · {eventLabel(deliverable.status)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {moduleId && unassignedDeliverables.length > 0 && (
+                    <optgroup label="Unassigned — selecting will attach to this module">
+                      {unassignedDeliverables.map((deliverable) => (
+                        <option value={deliverable.deliverable_id} key={deliverable.deliverable_id}>
+                          {deliverable.title} · {eventLabel(deliverable.status)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               </label>
             </>
@@ -598,6 +762,12 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
               <div><span>Workspace</span><strong>{summary?.binding?.workspace_id?.slice(0, 12) ?? 'Not opened'}</strong></div>
               <div><span>Last activity</span><strong>{timeLabel(summary?.last_activity_at)}</strong></div>
             </div>
+            {selectedModuleDelivery && (
+              <div className="inzozi-module-context-summary">
+                <strong>{selectedModuleDelivery.name}</strong>
+                <span>{selectedModuleDelivery.deliverable_complete}/{selectedModuleDelivery.deliverable_total} deliverables complete · {selectedModuleDelivery.progress_percent}%</span>
+              </div>
+            )}
             <div className="inzozi-sync-events">
               <strong>Recent engineering evidence</strong>
               {summary?.recent_events.length ? summary.recent_events.slice(0, 5).map((item) => (
