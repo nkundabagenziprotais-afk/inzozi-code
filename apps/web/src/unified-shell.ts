@@ -16,7 +16,8 @@ function goToProjectControl() {
 function goToEngineering() {
   if (document.querySelector('.studio-engineering-mode')) return
 
-  const engineeringButton = buttonByText('Open Engineering Workspace')
+  const engineeringButton = buttonByText('Continue in Engineering Space')
+    ?? buttonByText('Open Engineering Workspace')
     ?? buttonByText('Engineering Workspace')
 
   engineeringButton?.click()
@@ -55,6 +56,29 @@ function normalizeLegacyLabels() {
 
   const sessionChip = document.querySelector<HTMLElement>('.auth-session-chip')
   sessionChip?.setAttribute('aria-label', 'Signed-in Inzozi AI-Coding session')
+}
+
+function normalizeProjectControlTerminology() {
+  const sidebarLabel = document.querySelector<HTMLElement>('.studio-sidebar-heading > span')
+  if (sidebarLabel?.textContent?.trim() === 'MY PRODUCTS') {
+    sidebarLabel.textContent = 'MY SOLUTIONS'
+  }
+
+  const engineeringCta = document.querySelector<HTMLButtonElement>('.studio-hero-actions .studio-primary')
+  if (engineeringCta?.textContent?.trim() === 'Open Engineering Workspace') {
+    engineeringCta.textContent = 'Continue in Engineering Space'
+  }
+
+  document.querySelectorAll<HTMLButtonElement>('.studio-welcome-actions button').forEach((button) => {
+    if (button.textContent?.trim() === 'Continue Latest Product') {
+      button.textContent = 'Continue Latest Solution'
+    }
+  })
+
+  const emptyProducts = document.querySelector<HTMLElement>('.studio-sidebar > .studio-muted')
+  if (emptyProducts?.textContent?.includes('No products yet.')) {
+    emptyProducts.textContent = 'No solutions yet. Start from an idea, not a repository.'
+  }
 }
 
 function normalizeProjectControlHome() {
@@ -111,6 +135,7 @@ function enhanceSharedNavigation() {
 function enhanceShell() {
   enhanceSharedNavigation()
   normalizeLegacyLabels()
+  normalizeProjectControlTerminology()
   normalizeProjectControlHome()
 }
 
