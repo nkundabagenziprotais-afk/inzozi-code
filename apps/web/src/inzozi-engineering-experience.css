@@ -148,6 +148,13 @@
   max-width: 780px;
 }
 
+.welcome-card.inzozi-contextual-engineering > .eyebrow,
+.welcome-card.inzozi-contextual-engineering > h2,
+.welcome-card.inzozi-contextual-engineering > p,
+.welcome-card.inzozi-contextual-engineering > .welcome-actions {
+  display: none;
+}
+
 @media (max-width: 820px) {
   .inzozi-repository-heading,
   .inzozi-existing-repository-row {
