@@ -98,7 +98,7 @@ jobs:
       - name: Install
         working-directory: apps/web
         run: npm install
-      - name: Verify Inzozi AI-Coding scrolling contract
+      - name: Verify Inzozi AI Solution scrolling contract
         working-directory: apps/web
         run: |
           grep -Fq 'height: 100dvh;' src/studio-shell-refinement.css
@@ -132,9 +132,10 @@ jobs:
           grep -Fq 'Continue in Engineering Space' src/unified-shell.ts
           grep -Fq "import './module-delivery.css'" src/main.tsx
           grep -Fq '.studio-module-delivery-track' src/module-delivery.css
-      - name: Verify Inzozi AI-Coding Product ↔ Engineering synchronization contract
+      - name: Verify Product ↔ Engineering synchronization contract
         working-directory: apps/web
         run: |
+          # Legacy synchronization identifiers remain internal compatibility inputs.
           grep -Fq 'Inzozi AI-Coding' src/InzoziSolutionSync.tsx
           grep -Fq 'Project Control Center' src/InzoziSolutionSync.tsx
           grep -Fq 'Engineering Space' src/InzoziSolutionSync.tsx
@@ -167,15 +168,19 @@ jobs:
           grep -Fq "replaceAll('Aquila', 'Inzozi')" src/inzozi-engineering-experience.ts
           grep -Fq 'MutationObserver' src/inzozi-engineering-experience.ts
           grep -Fq 'characterData: true' src/inzozi-engineering-experience.ts
-      - name: Verify unified Inzozi AI-Coding shell contract
+      - name: Verify unified Inzozi AI Solution shell contract
         working-directory: apps/web
         run: |
           grep -Fq '.inzozi-delivery-body .studio-topbar' src/unified-shell.css
           grep -Fq '.inzozi-delivery-body .app-shell > .topbar' src/unified-shell.css
           grep -Fq '.inzozi-delivery-body .studio-return-control' src/unified-shell.css
           grep -Fq "data-unified-nav" src/unified-shell.ts
+          grep -Fq 'data-unified-destination' src/unified-shell.ts
           grep -Fq 'goToProjectControl' src/unified-shell.ts
           grep -Fq 'goToEngineering' src/unified-shell.ts
+          grep -Fq "BRAND_NAME = 'Inzozi AI Solution'" src/unified-shell.ts
+          grep -Fq "CONTROL_LABEL = 'Product Control'" src/unified-shell.ts
+          grep -Fq 'Return to Product Control' src/unified-shell.ts
           grep -Fq "import './unified-shell.css'" src/main.tsx
           grep -Fq "import './unified-shell'" src/main.tsx
           grep -Fq 'top: 10px;' src/unified-shell.css
@@ -188,7 +193,7 @@ jobs:
             echo 'unguarded empty-state text mutation would retrigger the MutationObserver indefinitely' >&2
             exit 1
           fi
-      - name: Verify official Inzozi AI brand contract
+      - name: Verify official Inzozi AI Solution brand contract
         working-directory: apps/web
         run: |
           test -s public/brand/inzozi-ai-mark.webp
@@ -196,14 +201,26 @@ jobs:
           grep -Fq "/brand/inzozi-ai-mark.webp" src/brand.css
           grep -Fq "/brand/inzozi-ai-logo.webp" src/AuthGate.tsx
           grep -Fq "import './brand.css'" src/main.tsx
-          grep -Fq '<title>Inzozi AI-Coding</title>' index.html
+          grep -Fq '<title>Inzozi AI Solution</title>' index.html
+          grep -Fq 'content="Inzozi AI Solution"' index.html
           grep -Fq 'href="/brand/inzozi-ai-mark.webp"' index.html
-          grep -Fq 'Opening Inzozi AI-Coding…' src/AuthGate.tsx
-          grep -Fq 'Signed-in Inzozi AI-Coding session' src/AuthGate.tsx
+          grep -Fq 'Opening Inzozi AI Solution…' src/AuthGate.tsx
+          grep -Fq '<strong>Inzozi AI Solution</strong>' src/AuthGate.tsx
+          grep -Fq 'Signed-in Inzozi AI Solution session' src/AuthGate.tsx
+          grep -Fq "BRAND_NAME = 'Inzozi AI Solution'" src/unified-shell.ts
+          grep -Fq "CONTROL_LABEL = 'Product Control'" src/unified-shell.ts
+          if grep -Fq '<title>Inzozi AI-Coding</title>' index.html; then
+            echo 'legacy customer-facing title must not return' >&2
+            exit 1
+          fi
+          if grep -Fq 'Opening Inzozi AI-Coding…' src/AuthGate.tsx; then
+            echo 'legacy customer-facing auth brand must not return' >&2
+            exit 1
+          fi
           if grep -Fq '<div className="auth-mark">IC</div>' src/AuthGate.tsx; then
             echo 'temporary IC auth mark must not return' >&2
             exit 1
           fi
-      - name: Build Inzozi AI-Coding product-control UI
+      - name: Build Inzozi AI Solution product-control UI
         working-directory: apps/web
         run: npm run build
