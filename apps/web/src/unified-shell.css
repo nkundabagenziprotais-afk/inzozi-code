@@ -1,7 +1,7 @@
 /*
- * Inzozi AI-Coding unified application shell.
+ * Inzozi AI Solution unified application shell.
  *
- * Product Control Center and Engineering Space keep their own internal layouts,
+ * Product Control and Engineering Space keep their own internal layouts,
  * but inherit one application chrome, palette and responsive boundary here.
  */
 
@@ -31,7 +31,7 @@
   background: #08101d;
 }
 
-/* The common Inzozi AI-Coding bar is the only application header. */
+/* The common Inzozi AI Solution bar is the only application header. */
 .inzozi-delivery-body .studio-topbar,
 .inzozi-delivery-body .app-shell > .topbar,
 .inzozi-delivery-body .studio-return-control {
@@ -100,6 +100,12 @@
   cursor: pointer;
   user-select: none;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+/* Legacy compatibility labels stay in the DOM for routing only and must never render. */
+.inzozi-sync-flow [hidden],
+.studio-return-control [hidden] {
+  display: none !important;
 }
 
 .inzozi-sync-flow span[data-unified-nav='true']:hover {
