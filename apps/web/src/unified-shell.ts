@@ -69,6 +69,13 @@ function setVisibleCompatibilityLabel(
   element.setAttribute('aria-label', visibleLabel)
 }
 
+function replaceProjectControlCopy(element: HTMLElement | null) {
+  if (!element) return
+  const current = element.textContent ?? ''
+  if (!current.includes('Project Control')) return
+  element.textContent = current.replaceAll('Project Control', CONTROL_LABEL)
+}
+
 function normalizeLegacyLabels() {
   document.querySelectorAll<HTMLElement>('.empty-editor .eyebrow').forEach((element) => {
     if (element.textContent?.trim() === 'INZOZI CODE ALPHA') {
@@ -116,6 +123,16 @@ function normalizeProjectControlTerminology() {
   document.querySelectorAll<HTMLElement>('.studio-product-hero .studio-eyebrow').forEach((element) => {
     if (element.textContent?.trim() === 'PROJECT CONTROL CENTER') {
       element.textContent = 'PRODUCT CONTROL'
+    }
+  })
+
+  document.querySelectorAll<HTMLElement>('.inzozi-engineering-binding-card > p').forEach((element) => {
+    replaceProjectControlCopy(element)
+  })
+
+  document.querySelectorAll<HTMLButtonElement>('[data-inzozi-return]').forEach((button) => {
+    if (button.textContent?.trim() === 'Return to Project Control') {
+      button.textContent = 'Return to Product Control'
     }
   })
 
