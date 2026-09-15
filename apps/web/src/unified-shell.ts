@@ -1,5 +1,9 @@
 const UNIFIED_NAV_ATTRIBUTE = 'data-unified-nav'
 const UNIFIED_HOME_ATTRIBUTE = 'data-unified-home'
+const UNIFIED_DESTINATION_ATTRIBUTE = 'data-unified-destination'
+const VISIBLE_LABEL_ATTRIBUTE = 'data-inzozi-visible-label'
+const BRAND_NAME = 'Inzozi AI Solution'
+const CONTROL_LABEL = 'Product Control'
 
 function buttonByText(fragment: string): HTMLButtonElement | null {
   return Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
@@ -35,6 +39,36 @@ function goHome() {
   document.querySelector<HTMLButtonElement>('.studio-brand')?.click()
 }
 
+function setVisibleCompatibilityLabel(
+  element: HTMLElement | null,
+  legacyLabel: string,
+  visibleLabel: string,
+) {
+  if (!element) return
+  if (element.getAttribute(VISIBLE_LABEL_ATTRIBUTE) === visibleLabel) return
+
+  const current = element.textContent?.trim() ?? ''
+  if (current !== legacyLabel && current !== visibleLabel) return
+
+  if (current === visibleLabel) {
+    element.setAttribute(VISIBLE_LABEL_ATTRIBUTE, visibleLabel)
+    element.setAttribute('aria-label', visibleLabel)
+    return
+  }
+
+  const legacy = document.createElement('span')
+  legacy.textContent = legacyLabel
+  legacy.hidden = true
+  legacy.setAttribute('aria-hidden', 'true')
+
+  const visible = document.createElement('span')
+  visible.textContent = visibleLabel
+
+  element.replaceChildren(legacy, visible)
+  element.setAttribute(VISIBLE_LABEL_ATTRIBUTE, visibleLabel)
+  element.setAttribute('aria-label', visibleLabel)
+}
+
 function normalizeLegacyLabels() {
   document.querySelectorAll<HTMLElement>('.empty-editor .eyebrow').forEach((element) => {
     if (element.textContent?.trim() === 'INZOZI CODE ALPHA') {
@@ -43,22 +77,48 @@ function normalizeLegacyLabels() {
   })
 
   document.querySelectorAll<HTMLElement>('.auth-brand strong').forEach((element) => {
-    if (element.textContent?.trim() === 'Inzozi Code') {
-      element.textContent = 'Inzozi AI-Coding'
+    const current = element.textContent?.trim()
+    if (current === 'Inzozi Code' || current === 'Inzozi AI-Coding') {
+      element.textContent = BRAND_NAME
     }
   })
 
   document.querySelectorAll<HTMLElement>('.auth-loading strong').forEach((element) => {
-    if (element.textContent?.includes('Opening Inzozi Code')) {
-      element.textContent = 'Opening Inzozi AI-Coding…'
+    const current = element.textContent ?? ''
+    if (current.includes('Opening Inzozi Code') || current.includes('Opening Inzozi AI-Coding')) {
+      element.textContent = `Opening ${BRAND_NAME}…`
     }
   })
 
   const sessionChip = document.querySelector<HTMLElement>('.auth-session-chip')
-  sessionChip?.setAttribute('aria-label', 'Signed-in Inzozi AI-Coding session')
+  sessionChip?.setAttribute('aria-label', `Signed-in ${BRAND_NAME} session`)
 }
 
 function normalizeProjectControlTerminology() {
+  const syncBrand = document.querySelector<HTMLElement>('.inzozi-sync-brand strong')
+  if (syncBrand && syncBrand.textContent?.trim() !== BRAND_NAME) {
+    syncBrand.textContent = BRAND_NAME
+  }
+
+  const syncBar = document.querySelector<HTMLElement>('.inzozi-sync-bar')
+  syncBar?.setAttribute('aria-label', `${BRAND_NAME} delivery synchronization`)
+
+  const controlNav = Array.from(document.querySelectorAll<HTMLElement>('.inzozi-sync-flow span'))
+    .find((element) => {
+      const text = element.textContent ?? ''
+      return text.includes('Project Control Center') || text.trim() === CONTROL_LABEL
+    }) ?? null
+  setVisibleCompatibilityLabel(controlNav, 'Project Control Center', CONTROL_LABEL)
+
+  const returnButton = document.querySelector<HTMLButtonElement>('.studio-return-control')
+  setVisibleCompatibilityLabel(returnButton, '← Project Control Center', '← Product Control')
+
+  document.querySelectorAll<HTMLElement>('.studio-product-hero .studio-eyebrow').forEach((element) => {
+    if (element.textContent?.trim() === 'PROJECT CONTROL CENTER') {
+      element.textContent = 'PRODUCT CONTROL'
+    }
+  })
+
   const sidebarLabel = document.querySelector<HTMLElement>('.studio-sidebar-heading > span')
   if (sidebarLabel?.textContent?.trim() === 'MY PRODUCTS') {
     sidebarLabel.textContent = 'MY SOLUTIONS'
@@ -83,8 +143,8 @@ function normalizeProjectControlTerminology() {
 
 function normalizeProjectControlHome() {
   const welcomeCopy = document.querySelector<HTMLElement>('.studio-welcome-copy p')
-  if (welcomeCopy?.textContent?.includes('Aquila Studio turns an idea')) {
-    welcomeCopy.textContent = 'Inzozi AI-Coding turns an idea into a product blueprint, system map, ordered deliverables and a synchronized engineering journey. Technical details remain available inside Engineering Space when you need them.'
+  if (welcomeCopy?.textContent?.includes('Aquila Studio turns an idea') || welcomeCopy?.textContent?.includes('Inzozi AI-Coding turns an idea')) {
+    welcomeCopy.textContent = `${BRAND_NAME} turns an idea into a product blueprint, system map, ordered deliverables and a synchronized engineering journey. Technical details remain available inside Engineering Space when you need them.`
   }
 
   const foundationHeading = document.querySelector<HTMLElement>('.studio-foundation-note strong')
@@ -94,7 +154,9 @@ function normalizeProjectControlHome() {
 
   const foundationCopy = document.querySelector<HTMLElement>('.studio-foundation-note p')
   if (foundationCopy?.textContent?.includes('Secure workspaces, Aquila modes')) {
-    foundationCopy.textContent = 'Plan and govern work here, then continue the selected module and deliverable in Engineering Space. Engineering evidence synchronizes back into Project Control.'
+    foundationCopy.textContent = 'Plan and govern work here, then continue the selected module and deliverable in Engineering Space. Engineering evidence synchronizes back into Product Control.'
+  } else if (foundationCopy?.textContent?.includes('synchronizes back into Project Control')) {
+    foundationCopy.textContent = foundationCopy.textContent.replace('Project Control', 'Product Control')
   }
 
   const syncBar = document.querySelector<HTMLElement>('.inzozi-sync-bar')
@@ -117,26 +179,34 @@ function enhanceSharedNavigation() {
     brand.setAttribute(UNIFIED_HOME_ATTRIBUTE, 'true')
     brand.setAttribute('role', 'button')
     brand.tabIndex = 0
-    brand.setAttribute('aria-label', 'Open Inzozi AI-Coding Project Control home')
+    brand.setAttribute('aria-label', `Open ${BRAND_NAME} ${CONTROL_LABEL} home`)
   }
 
   document.querySelectorAll<HTMLElement>('.inzozi-sync-flow span').forEach((element) => {
-    if (element.getAttribute(UNIFIED_NAV_ATTRIBUTE) === 'true') return
-    const label = element.textContent?.trim()
-    if (label !== 'Project Control Center' && label !== 'Engineering Space') return
+    const text = element.textContent ?? ''
+    const destination = text.includes('Project Control Center') || text.includes(CONTROL_LABEL)
+      ? 'control'
+      : text.includes('Engineering Space')
+        ? 'engineering'
+        : ''
 
-    element.setAttribute(UNIFIED_NAV_ATTRIBUTE, 'true')
-    element.setAttribute('role', 'button')
-    element.tabIndex = 0
-    element.setAttribute('aria-label', `Open ${label}`)
+    if (!destination) return
+
+    element.setAttribute(UNIFIED_DESTINATION_ATTRIBUTE, destination)
+    if (element.getAttribute(UNIFIED_NAV_ATTRIBUTE) !== 'true') {
+      element.setAttribute(UNIFIED_NAV_ATTRIBUTE, 'true')
+      element.setAttribute('role', 'button')
+      element.tabIndex = 0
+    }
+    element.setAttribute('aria-label', destination === 'control' ? `Open ${CONTROL_LABEL}` : 'Open Engineering Space')
   })
 }
 
 function enhanceShell() {
-  enhanceSharedNavigation()
   normalizeLegacyLabels()
   normalizeProjectControlTerminology()
   normalizeProjectControlHome()
+  enhanceSharedNavigation()
 }
 
 function activateTarget(target: EventTarget | null) {
@@ -144,9 +214,9 @@ function activateTarget(target: EventTarget | null) {
 
   const nav = target.closest<HTMLElement>(`.inzozi-sync-flow span[${UNIFIED_NAV_ATTRIBUTE}='true']`)
   if (nav) {
-    const label = nav.textContent?.trim()
-    if (label === 'Project Control Center') goToProjectControl()
-    if (label === 'Engineering Space') goToEngineering()
+    const destination = nav.getAttribute(UNIFIED_DESTINATION_ATTRIBUTE)
+    if (destination === 'control') goToProjectControl()
+    if (destination === 'engineering') goToEngineering()
     return true
   }
 
