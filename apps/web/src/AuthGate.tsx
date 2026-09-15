@@ -98,7 +98,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     return (
       <main className="auth-shell auth-loading" aria-live="polite">
         <img className="auth-mark auth-mark-image" src="/brand/inzozi-ai-mark.webp" alt="" aria-hidden="true" />
-        <strong>Opening Inzozi AI-Coding…</strong>
+        <strong>Opening Inzozi AI Solution…</strong>
         <span>Checking the private staging session.</span>
       </main>
     )
@@ -110,7 +110,7 @@ export default function AuthGate({ children }: AuthGateProps) {
         <section className="auth-card">
           <div className="auth-brand auth-brand-official">
             <img className="auth-brand-lockup" src="/brand/inzozi-ai-logo.webp" alt="Inzozi AI Solution" />
-            <div><strong>Inzozi AI-Coding</strong><span>Private staging access</span></div>
+            <div><strong>Inzozi AI Solution</strong><span>Private staging access</span></div>
           </div>
           <div className="auth-copy">
             <span className="auth-eyebrow">INZOZI AI SOLUTION</span>
@@ -138,7 +138,7 @@ export default function AuthGate({ children }: AuthGateProps) {
   return (
     <>
       {children}
-      <div className="auth-session-chip" aria-label="Signed-in Inzozi AI-Coding session">
+      <div className="auth-session-chip" aria-label="Signed-in Inzozi AI Solution session">
         <span><strong>{session.email}</strong><small>{ROLE_LABELS[session.role] || session.role}</small></span>
         <button type="button" onClick={signOut} disabled={busy}>Sign out</button>
       </div>
