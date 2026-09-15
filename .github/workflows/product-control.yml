@@ -185,6 +185,14 @@ jobs:
           grep -Fq "import './unified-shell'" src/main.tsx
           grep -Fq 'top: 10px;' src/unified-shell.css
           grep -Fq 'margin-right: 198px;' src/unified-shell.css
+      - name: Verify legacy navigation labels remain visually hidden
+        working-directory: apps/web
+        run: |
+          grep -Fq '.inzozi-sync-flow [hidden],' src/unified-shell.css
+          grep -Fq '.studio-return-control [hidden] {' src/unified-shell.css
+          grep -A2 -F '.inzozi-sync-flow [hidden],' src/unified-shell.css | grep -Fq 'display: none !important;'
+          grep -Fq 'legacy.hidden = true' src/unified-shell.ts
+          grep -Fq "legacy.setAttribute('aria-hidden', 'true')" src/unified-shell.ts
       - name: Verify unified shell normalization is mutation-safe
         working-directory: apps/web
         run: |
