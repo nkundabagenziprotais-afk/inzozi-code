@@ -1,0 +1,417 @@
+/* Dedicated Delivery Review workspace.
+   Git behavior remains unchanged; this stylesheet only reallocates the existing review UI. */
+
+.inzozi-platform-frame.delivery-review-open .app-shell {
+  grid-template-rows: 60px minmax(0, 1fr) 30px;
+}
+
+.inzozi-platform-frame.delivery-review-open .app-shell > .workspace {
+  display: none;
+}
+
+.inzozi-platform-frame.delivery-review-open .app-shell > .bottom {
+  grid-row: 2;
+  min-height: 0;
+  height: auto !important;
+  display: grid;
+  grid-template-rows: 48px minmax(0, 1fr);
+  border-top: 0;
+  overflow: hidden;
+  background: #0c1112;
+}
+
+.inzozi-platform-frame.delivery-review-open .bottom-tabs {
+  height: 48px;
+  padding: 0 14px;
+  gap: 3px;
+  background: #0f1516;
+}
+
+.inzozi-platform-frame.delivery-review-open .bottom-tabs > button {
+  height: 34px;
+  border-radius: 7px;
+  padding: 0 11px;
+}
+
+.inzozi-platform-frame.delivery-review-open .bottom-tabs > button:nth-child(4) {
+  min-width: 120px;
+  font-size: 0;
+  border: 1px solid #557a6c;
+  background: rgba(145, 221, 191, .08);
+  color: var(--accent);
+}
+
+.inzozi-platform-frame.delivery-review-open .bottom-tabs > button:nth-child(4)::after {
+  content: 'DELIVERY REVIEW';
+  font-size: 10px;
+  letter-spacing: .05em;
+}
+
+.inzozi-platform-frame.delivery-review-open .bottom-tabs .command-spacer,
+.inzozi-platform-frame.delivery-review-open .bottom-tabs .command-spacer ~ button {
+  display: none;
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-panel {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.9fr) minmax(330px, .95fr);
+  grid-template-rows: auto minmax(130px, .7fr) auto minmax(230px, 1.2fr) auto;
+  grid-template-areas:
+    'summary summary'
+    'diff controls'
+    'diff push'
+    'diff pr'
+    'diff message';
+  overflow: hidden;
+  background: #0c1112;
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-summary {
+  grid-area: summary;
+  min-height: 76px;
+  padding: 13px 18px 12px;
+  border-bottom: 1px solid #2d3937;
+  background: #101617;
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-summary::after {
+  content: '01  REVIEW CHANGES    →    02  LOCAL COMMIT    →    03  REMOTE PUSH    →    04  DRAFT PR';
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 8px;
+  color: #73807c;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: .045em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-summary {
+  position: relative;
+  padding-bottom: 28px;
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-summary strong {
+  font-size: 12px;
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-summary small {
+  display: block;
+  font-size: 10px;
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-summary button {
+  padding: 8px 11px;
+  font-size: 10px;
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-diff {
+  grid-area: diff;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  margin: 0;
+  padding: 18px 20px 28px;
+  border-right: 1px solid #2d3937;
+  background: #090e0f;
+  color: #d0d8d5;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-diff::selection {
+  background: rgba(145, 221, 191, .22);
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-controls {
+  grid-area: controls;
+  min-width: 0;
+  min-height: 0;
+  display: block;
+  padding: 16px;
+  border-bottom: 1px solid #263230;
+  overflow: auto;
+  background: #101617;
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-controls::before {
+  content: 'LOCAL COMMIT';
+  display: block;
+  margin-bottom: 10px;
+  color: #798682;
+  font-size: 9px;
+  letter-spacing: .1em;
+  font-weight: 700;
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-form label {
+  font-size: 9px;
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-form input {
+  padding: 10px 11px;
+  font-size: 11px;
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-form button,
+.inzozi-platform-frame.delivery-review-open .commit-approval-card button,
+.inzozi-platform-frame.delivery-review-open .remote-push-gate button,
+.inzozi-platform-frame.delivery-review-open .pull-request-gate button {
+  min-height: 36px;
+  font-size: 10px;
+}
+
+.inzozi-platform-frame.delivery-review-open .commit-approval-card {
+  margin-top: 10px;
+  grid-template-columns: 1fr;
+  grid-template-areas: 'title' 'meta' 'action';
+  gap: 7px;
+  padding: 12px;
+}
+
+.inzozi-platform-frame.delivery-review-open .commit-approval-card button {
+  width: 100%;
+}
+
+.inzozi-platform-frame.delivery-review-open .remote-push-gate {
+  grid-area: push;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: 10px;
+  padding: 15px 16px;
+  border-bottom: 1px solid #263230;
+  background: #0f1516;
+}
+
+.inzozi-platform-frame.delivery-review-open .remote-push-gate::before {
+  content: 'REMOTE PUSH';
+  color: #798682;
+  font-size: 9px;
+  letter-spacing: .1em;
+  font-weight: 700;
+}
+
+.inzozi-platform-frame.delivery-review-open .remote-push-gate > button,
+.inzozi-platform-frame.delivery-review-open .push-approval-actions button {
+  width: 100%;
+}
+
+.inzozi-platform-frame.delivery-review-open .push-approval-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-gate {
+  grid-area: pr;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid #263230;
+  overflow: auto;
+  background: #101617;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-gate::before {
+  content: 'DRAFT PULL REQUEST';
+  color: #798682;
+  font-size: 9px;
+  letter-spacing: .1em;
+  font-weight: 700;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-heading {
+  align-items: flex-start;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-heading > div {
+  gap: 4px;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-heading strong {
+  font-size: 11px;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-heading small {
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-heading a {
+  padding: 8px 10px;
+  font-size: 10px;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  align-items: start;
+  gap: 10px;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-form label {
+  font-size: 9px;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-form input,
+.inzozi-platform-frame.delivery-review-open .pull-request-form select,
+.inzozi-platform-frame.delivery-review-open .pull-request-form textarea {
+  padding: 10px 11px;
+  font-size: 11px;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-body {
+  grid-column: 1 / -1;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-form textarea {
+  height: 190px;
+  min-height: 150px;
+  max-height: 360px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-form > button {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-approval-card {
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: 10px;
+  padding: 12px;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-approval-card button {
+  width: 100%;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-gate:has(.pull-request-heading a) {
+  border: 1px solid #466c5d;
+  margin: 12px 14px;
+  border-radius: 10px;
+  background: rgba(145, 221, 191, .06);
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-gate:has(.pull-request-heading a) .pull-request-form {
+  display: none;
+}
+
+.inzozi-platform-frame.delivery-review-open .pull-request-gate:has(.pull-request-heading a)::after {
+  content: 'Draft PR created · merge disabled · deployment not started';
+  display: block;
+  padding: 10px 11px;
+  border: 1px solid rgba(145, 221, 191, .2);
+  border-radius: 8px;
+  background: rgba(145, 221, 191, .06);
+  color: #a9cdbf;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.inzozi-platform-frame.delivery-review-open .git-review-message {
+  grid-area: message;
+  align-self: end;
+  padding: 11px 16px;
+  border-top: 1px solid #263230;
+  border-bottom: 0;
+  background: #0d1314;
+  color: #9faeaa;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.inzozi-platform-frame.delivery-review-open .app-shell footer {
+  grid-row: 3;
+}
+
+@media (max-width: 1080px) {
+  .inzozi-platform-frame.delivery-review-open .git-review-panel {
+    overflow: auto;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto auto auto minmax(360px, 1fr);
+    grid-template-areas:
+      'summary'
+      'controls'
+      'push'
+      'pr'
+      'message'
+      'diff';
+  }
+
+  .inzozi-platform-frame.delivery-review-open .git-review-diff {
+    min-height: 360px;
+    height: auto;
+    border-top: 1px solid #2d3937;
+    border-right: 0;
+  }
+
+  .inzozi-platform-frame.delivery-review-open .pull-request-form textarea {
+    height: 170px;
+  }
+}
+
+@media (max-width: 700px) {
+  .inzozi-platform-frame.delivery-review-open .app-shell {
+    grid-template-rows: 56px minmax(0, 1fr) 28px;
+  }
+
+  .inzozi-platform-frame.delivery-review-open .bottom-tabs {
+    overflow-x: auto;
+    padding: 0 8px;
+  }
+
+  .inzozi-platform-frame.delivery-review-open .bottom-tabs > button {
+    flex: 0 0 auto;
+  }
+
+  .inzozi-platform-frame.delivery-review-open .git-review-summary {
+    min-height: 88px;
+    align-items: flex-start;
+  }
+
+  .inzozi-platform-frame.delivery-review-open .git-review-summary::after {
+    white-space: normal;
+    line-height: 1.4;
+  }
+
+  .inzozi-platform-frame.delivery-review-open .git-review-summary small {
+    display: block;
+  }
+
+  .inzozi-platform-frame.delivery-review-open .pull-request-form {
+    grid-template-columns: 1fr;
+  }
+
+  .inzozi-platform-frame.delivery-review-open .pull-request-body,
+  .inzozi-platform-frame.delivery-review-open .pull-request-form > button {
+    grid-column: auto;
+  }
+
+  .inzozi-platform-frame.delivery-review-open .pull-request-form textarea {
+    height: 180px;
+    min-height: 160px;
+  }
+}

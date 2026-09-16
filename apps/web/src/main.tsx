@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import AuthGate from './AuthGate'
+import InzoziPlatformFrame from './InzoziPlatformFrame'
 import InzoziSolutionSync from './InzoziSolutionSync'
 import StudioShell from './StudioShell'
 import './styles.css'
@@ -18,6 +19,8 @@ import './unified-shell.css'
 import './brand.css'
 import './inzozi-engineering-experience.css'
 import './engineering-runtime-readiness.css'
+import './inzozi-platform-frame.css'
+import './delivery-review-workspace.css'
 import './unified-shell'
 import './inzozi-engineering-experience'
 import './engineering-runtime-readiness'
@@ -25,9 +28,11 @@ import './engineering-runtime-readiness'
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <AuthGate>
-      <InzoziSolutionSync>
-        <StudioShell />
-      </InzoziSolutionSync>
+      <InzoziPlatformFrame>
+        <InzoziSolutionSync>
+          <StudioShell />
+        </InzoziSolutionSync>
+      </InzoziPlatformFrame>
     </AuthGate>
   </React.StrictMode>,
 )
