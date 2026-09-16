@@ -46,22 +46,19 @@
 
 .auth-brand-official {
   align-items: center;
-  gap: 16px;
+  justify-content: center;
+  gap: 0;
 }
 
 .auth-brand-lockup {
   display: block;
-  width: min(210px, 44%);
+  width: min(260px, 72%);
   height: auto;
   padding: 5px;
   border: 1px solid rgba(56, 189, 248, 0.22);
   border-radius: 10px;
   background: #fff;
   object-fit: contain;
-}
-
-.auth-brand-official > div:last-child {
-  min-width: 0;
 }
 
 /* Engineering Space first-run and connected-workspace identity. */
@@ -91,11 +88,12 @@
   }
 
   .auth-brand-official {
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex-direction: row;
   }
 
   .auth-brand-lockup {
-    width: min(220px, 76%);
+    width: min(250px, 84%);
   }
 }
