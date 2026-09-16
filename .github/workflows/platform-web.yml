@@ -18,6 +18,9 @@ jobs:
 
           html = Path('apps/platform-web/index.html').read_text()
           css = Path('apps/platform-web/styles.css').read_text()
+          brand_css = Path('apps/platform-web/brand-official.css').read_text()
+          auth_gate = Path('apps/web/src/AuthGate.tsx').read_text()
+          auth_brand = Path('apps/web/src/brand.css').read_text()
 
           required_html = (
               'Inzozi Digital',
@@ -47,6 +50,18 @@ jobs:
           if html.count('href="https://ai.inzozidigital.com"') < 4:
               raise SystemExit('Active Inzozi AI route is not prominent enough')
 
+          if '/brand-official.css' not in html or html.count('official-logo-lockup') < 2:
+              raise SystemExit('Official Inzozi DPS lockup is not wired into the parent platform')
+
+          if '--inzozi-dps-logo' not in brand_css or 'data:image/webp;base64,' not in brand_css:
+              raise SystemExit('Approved Inzozi DPS artwork is missing from the parent branding stylesheet')
+
+          if 'Private staging access' in auth_gate:
+              raise SystemExit('Legacy private staging access label remains on the AI login page')
+
+          if 'auth-brand-official' not in auth_brand or 'justify-content: center;' not in auth_brand:
+              raise SystemExit('AI login logo centering contract is missing')
+
           for expected in ('@media (max-width: 1180px)', '@media (max-width: 860px)', '@media (max-width: 620px)'):
               if expected not in css:
                   raise SystemExit('Missing responsive contract: ' + expected)
@@ -55,6 +70,8 @@ jobs:
               raise SystemExit('Reduced-motion accessibility contract missing')
 
           print('PLATFORM_INFORMATION_ARCHITECTURE=PASS')
+          print('PARENT_BRAND_IDENTITY=PASS')
+          print('AI_LOGIN_BRAND_HEADER=PASS')
           print('RESPONSIVE_UI_CONTRACT=PASS')
           print('ACCESSIBILITY_CONTRACT=PASS')
           PY
@@ -93,12 +110,16 @@ jobs:
 
           test "$(docker exec inzozi-digital-platform-web-ci stat -c '%a' /usr/share/nginx/html/index.html)" = '644'
           test "$(docker exec inzozi-digital-platform-web-ci stat -c '%a' /usr/share/nginx/html/styles.css)" = '644'
+          test "$(docker exec inzozi-digital-platform-web-ci stat -c '%a' /usr/share/nginx/html/brand-official.css)" = '644'
           test "$(docker exec inzozi-digital-platform-web-ci stat -c '%a' /usr/share/nginx/html/app.js)" = '644'
 
           curl -fsS http://127.0.0.1:18081/ | grep -q 'One digital home.'
           curl -fsS http://127.0.0.1:18081/ | grep -q 'Inzozi AI Coding'
+          curl -fsS http://127.0.0.1:18081/ | grep -q 'official-logo-lockup'
+          curl -fsS http://127.0.0.1:18081/brand-official.css | grep -q -- '--inzozi-dps-logo'
 
           echo 'PLATFORM_STATIC_FILE_PERMISSIONS=PASS'
+          echo 'PLATFORM_PARENT_BRANDING=PASS'
           echo 'PLATFORM_WEB_RUNTIME=PASS'
 
       - name: Validate platform Compose override
