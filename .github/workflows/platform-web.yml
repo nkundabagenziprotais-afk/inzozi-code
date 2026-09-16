@@ -1,0 +1,140 @@
+name: Platform Web
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  platform-web-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate platform information architecture
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          html = Path('apps/platform-web/index.html').read_text()
+          css = Path('apps/platform-web/styles.css').read_text()
+
+          required_html = (
+              'Inzozi Digital',
+              'www.inzozidigital.com',
+              'Inzozi AI Solution',
+              'https://ai.inzozidigital.com',
+              'Inzozi AI Coding',
+              'Inzozi AI Professional',
+              'Inzozi AI Research',
+              'Inzozi AI Academia',
+              'Inzozi AI Automation',
+              'Inzozi AI Analytics',
+              'Inzozi AI Creative',
+              'Inzozi Financial Solution',
+              'Inzozi Health Solution',
+              'Inzozi Transport Solution',
+              'Inzozi Education Solution',
+              'Inzozi Agri Solution',
+              'Inzozi Business Management Solution',
+              'Dedicated subdomain on activation',
+          )
+
+          missing = [item for item in required_html if item not in html]
+          if missing:
+              raise SystemExit('Missing platform content: ' + repr(missing))
+
+          if html.count('href="https://ai.inzozidigital.com"') < 4:
+              raise SystemExit('Active Inzozi AI route is not prominent enough')
+
+          for expected in ('@media (max-width: 1180px)', '@media (max-width: 860px)', '@media (max-width: 620px)'):
+              if expected not in css:
+                  raise SystemExit('Missing responsive contract: ' + expected)
+
+          if 'prefers-reduced-motion' not in css:
+              raise SystemExit('Reduced-motion accessibility contract missing')
+
+          print('PLATFORM_INFORMATION_ARCHITECTURE=PASS')
+          print('RESPONSIVE_UI_CONTRACT=PASS')
+          print('ACCESSIBILITY_CONTRACT=PASS')
+          PY
+
+      - name: Build parent website image
+        run: |
+          docker build \
+            --tag inzozi-digital-platform-web:ci \
+            apps/platform-web
+
+      - name: Exercise parent website runtime
+        run: |
+          docker run -d \
+            --name inzozi-digital-platform-web-ci \
+            -p 127.0.0.1:18081:80 \
+            inzozi-digital-platform-web:ci
+
+          cleanup() {
+            docker rm -f inzozi-digital-platform-web-ci >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18081/health >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs inzozi-digital-platform-web-ci
+              exit 1
+            fi
+            sleep 1
+          done
+
+          test "$(curl -fsS http://127.0.0.1:18081/health)" = 'ok'
+          test "$(curl -fsS http://127.0.0.1:18081/ready)" = 'ready'
+          curl -fsS http://127.0.0.1:18081/ | grep -q 'One digital home.'
+          curl -fsS http://127.0.0.1:18081/ | grep -q 'Inzozi AI Coding'
+
+          echo 'PLATFORM_WEB_RUNTIME=PASS'
+
+      - name: Validate platform Compose override
+        env:
+          DATABASE_URL: postgresql://inzozi_code:test@postgres:5432/inzozi_code
+          REDIS_URL: redis://redis:6379/0
+          POSTGRES_PASSWORD: test-only
+          WORKSPACE_BROKER_TOKEN: ci-only-token
+        run: |
+          docker compose \
+            -f docker-compose.yml \
+            -f infrastructure/staging/docker-compose.platform-web.yml \
+            config >/dev/null
+
+          echo 'PLATFORM_COMPOSE_OVERRIDE=PASS'
+
+      - name: Validate www host Nginx template
+        run: |
+          TMP_TLS="$(mktemp -d)"
+          trap 'rm -rf "$TMP_TLS"' EXIT
+          mkdir -p "$TMP_TLS/certs"
+
+          openssl req \
+            -x509 \
+            -newkey rsa:2048 \
+            -nodes \
+            -days 1 \
+            -subj '/CN=inzozidigital.com' \
+            -addext 'subjectAltName=DNS:inzozidigital.com,DNS:www.inzozidigital.com' \
+            -keyout "$TMP_TLS/certs/privkey.pem" \
+            -out "$TMP_TLS/certs/fullchain.pem" \
+            >/dev/null 2>&1
+
+          docker run --rm \
+            -v "$PWD/infrastructure/staging/inzozi-digital-platform-nginx.conf.template:/etc/nginx/conf.d/default.conf:ro" \
+            -v "$TMP_TLS/certs:/etc/letsencrypt/live/inzozidigital.com:ro" \
+            nginx:1.27-alpine \
+            nginx -t
+
+          grep -q 'server_name www.inzozidigital.com;' infrastructure/staging/inzozi-digital-platform-nginx.conf.template
+          grep -q 'proxy_pass http://127.0.0.1:8081;' infrastructure/staging/inzozi-digital-platform-nginx.conf.template
+          grep -q 'return 308 https://www.inzozidigital.com$request_uri;' infrastructure/staging/inzozi-digital-platform-nginx.conf.template
+          grep -q 'Content-Security-Policy' infrastructure/staging/inzozi-digital-platform-nginx.conf.template
+
+          echo 'PLATFORM_HOST_NGINX_TEMPLATE=PASS'
