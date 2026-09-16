@@ -121,6 +121,12 @@
   cursor: pointer;
 }
 
+.inzozi-existing-repository-row > button,
+.inzozi-repository-actions button {
+  font-size: 12px;
+  line-height: 1.25;
+}
+
 .inzozi-engineering-binding-card button:hover {
   border-color: #3f655d;
 }
