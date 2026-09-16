@@ -1,0 +1,21 @@
+.github-selector-placeholder button[data-state='connected'] {
+  opacity: 1;
+  border-color: rgba(79, 209, 154, 0.45);
+  background: rgba(36, 118, 89, 0.18);
+  color: #9df0ca;
+}
+
+.github-selector-placeholder button[data-state='checking'] {
+  opacity: 0.8;
+}
+
+.engineering-ownership-readiness {
+  margin-top: 0.25rem;
+  border: 1px solid rgba(245, 180, 74, 0.35);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  background: rgba(135, 91, 24, 0.14);
+  color: #e8c98c;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
