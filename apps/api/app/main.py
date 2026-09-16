@@ -8,6 +8,7 @@ from app.product.engineering_sync import ensure_engineering_sync_schema
 from app.product.store import ensure_product_schema
 from app.routes.agent import router as agent_router
 from app.routes.auth import router as auth_router
+from app.routes.engineering_readiness import router as engineering_readiness_router
 from app.routes.git_pull_request import router as git_pull_request_router
 from app.routes.git_remote import router as git_remote_router
 from app.routes.github_app import router as github_app_router
@@ -85,6 +86,7 @@ def create_app() -> FastAPI:
     application.include_router(git_remote_router)
     application.include_router(git_pull_request_router)
     application.include_router(github_app_router)
+    application.include_router(engineering_readiness_router)
 
     @application.get("/")
     def root() -> dict:
