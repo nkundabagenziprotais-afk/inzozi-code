@@ -1,9 +1,23 @@
-type WorkspaceRuntimeStatus = {
+type EngineeringReadiness = {
   github_app_configured?: boolean
+  workspace_ownership_enforced?: boolean
 }
 
-let githubAppConfigured: boolean | null = null
+const upstreamFetch = window.fetch.bind(window)
+let readiness: EngineeringReadiness | null = null
 let renderQueued = false
+
+function requestUrl(input: RequestInfo | URL) {
+  if (typeof input === 'string') return input
+  if (input instanceof URL) return input.toString()
+  return input.url
+}
+
+function requestMethod(input: RequestInfo | URL, init?: RequestInit) {
+  if (init?.method) return init.method.toUpperCase()
+  if (typeof Request !== 'undefined' && input instanceof Request) return input.method.toUpperCase()
+  return 'GET'
+}
 
 function repositoryLabel(value: string) {
   return value
@@ -27,8 +41,9 @@ function renderGitHubReadiness() {
 
   const description = placeholder.querySelector<HTMLElement>('small')
   const status = placeholder.querySelector<HTMLButtonElement>('button')
+  const configured = readiness?.github_app_configured
 
-  if (githubAppConfigured === true) {
+  if (configured === true) {
     if (description) {
       description.textContent = 'GitHub App authentication is active. Solution-bound repositories can open guarded workspaces.'
     }
@@ -39,7 +54,7 @@ function renderGitHubReadiness() {
     return
   }
 
-  if (githubAppConfigured === false) {
+  if (configured === false) {
     if (description) {
       description.textContent = 'GitHub App authentication is not configured for this environment.'
     }
@@ -56,6 +71,34 @@ function renderGitHubReadiness() {
   if (status) {
     status.textContent = 'Checking GitHub App…'
     status.dataset.state = 'checking'
+  }
+}
+
+function renderWorkspaceOwnershipReadiness() {
+  const input = repositoryInput()
+  const form = input?.closest('form')
+  if (!form) return
+
+  const existing = form.querySelector<HTMLElement>('[data-engineering-ownership-readiness]')
+  const createButton = form.querySelector<HTMLButtonElement>('button.primary-action')
+
+  if (readiness?.workspace_ownership_enforced !== false) {
+    existing?.remove()
+    return
+  }
+
+  let notice = existing
+  if (!notice) {
+    notice = document.createElement('div')
+    notice.dataset.engineeringOwnershipReadiness = 'disabled'
+    notice.className = 'engineering-ownership-readiness'
+    createButton?.before(notice)
+  }
+
+  notice.textContent = 'Guarded workspace ownership is not enabled in this environment. Workspace creation remains disabled until durable ownership is enabled.'
+  if (createButton) {
+    createButton.disabled = true
+    createButton.title = 'Enable durable workspace ownership before creating a guarded workspace.'
   }
 }
 
@@ -81,6 +124,7 @@ function renderRepositoryAwareAgentState() {
 
 function render() {
   renderGitHubReadiness()
+  renderWorkspaceOwnershipReadiness()
   renderRepositoryAwareAgentState()
 }
 
@@ -93,22 +137,45 @@ function queueRender() {
   })
 }
 
-async function loadRuntimeReadiness() {
+async function loadEngineeringReadiness() {
   try {
-    const response = await window.fetch('/api/v1/workspaces/runtime', {
+    const response = await upstreamFetch('/api/v1/engineering-readiness', {
       credentials: 'same-origin',
     })
     if (!response.ok) {
-      githubAppConfigured = false
+      readiness = {
+        github_app_configured: false,
+      }
       queueRender()
-      return
+      return readiness
     }
-    const payload = await response.json() as WorkspaceRuntimeStatus
-    githubAppConfigured = payload.github_app_configured === true
+    readiness = await response.json() as EngineeringReadiness
   } catch {
-    githubAppConfigured = false
+    readiness = {
+      github_app_configured: false,
+    }
   }
   queueRender()
+  return readiness
+}
+
+const readinessPromise = loadEngineeringReadiness()
+
+window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = requestUrl(input)
+  const method = requestMethod(input, init)
+
+  if (method === 'GET' && /\/api\/v1\/workspaces\/recovery(?:\?|$)/.test(url)) {
+    const current = readiness ?? await readinessPromise
+    if (current?.workspace_ownership_enforced === false) {
+      return new Response(JSON.stringify({ workspaces: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+  }
+
+  return upstreamFetch(input, init)
 }
 
 const observer = new MutationObserver(() => queueRender())
@@ -129,5 +196,4 @@ document.addEventListener('change', (event) => {
   }
 })
 
-void loadRuntimeReadiness()
 queueRender()
