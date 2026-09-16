@@ -20,5 +20,8 @@
   "devDependencies": {
     "@types/react": "latest",
     "@types/react-dom": "latest"
+  },
+  "overrides": {
+    "rolldown": "1.2.8"
   }
 }
