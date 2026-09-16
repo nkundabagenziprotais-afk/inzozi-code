@@ -1,0 +1,242 @@
+.inzozi-platform-frame {
+  height: 100vh;
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--bg, #0b0f10);
+}
+
+.inzozi-platform-ribbon {
+  position: relative;
+  z-index: 30;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border, #263134);
+  background: #0a0f10;
+  color: #dbe3e0;
+}
+
+.inzozi-platform-breadcrumb {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inzozi-platform-breadcrumb > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.inzozi-platform-breadcrumb strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.inzozi-platform-breadcrumb small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #75827e;
+  font-size: 8px;
+}
+
+.inzozi-platform-parent strong {
+  color: #eef3f1;
+}
+
+.inzozi-platform-current strong {
+  color: var(--accent, #91ddbf);
+}
+
+.inzozi-platform-separator {
+  color: #46524f;
+  font-size: 13px;
+}
+
+.inzozi-platform-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+
+.inzozi-back-engineering,
+.inzozi-platform-menu > summary {
+  border: 1px solid #30403d;
+  border-radius: 7px;
+  background: #101617;
+  color: #cbd4d1;
+  padding: 6px 9px;
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+  list-style: none;
+}
+
+.inzozi-back-engineering {
+  border-color: #54796b;
+  color: var(--accent, #91ddbf);
+  background: rgba(145, 221, 191, .08);
+}
+
+.inzozi-platform-menu {
+  position: relative;
+}
+
+.inzozi-platform-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.inzozi-platform-menu[open] > summary {
+  border-color: #4c6e62;
+  color: var(--accent, #91ddbf);
+}
+
+.inzozi-platform-menu-card {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  width: 280px;
+  max-height: min(520px, calc(100vh - 70px));
+  overflow: auto;
+  display: grid;
+  gap: 5px;
+  padding: 9px;
+  border: 1px solid #33413f;
+  border-radius: 10px;
+  background: #101617;
+  box-shadow: 0 18px 55px rgba(0, 0, 0, .42);
+}
+
+.inzozi-platform-menu-card.solutions {
+  width: 310px;
+}
+
+.inzozi-platform-menu-kicker {
+  padding: 3px 5px 6px;
+  color: #73807c;
+  font-size: 8px;
+  letter-spacing: .11em;
+  font-weight: 700;
+}
+
+.inzozi-platform-menu-card > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: #0d1213;
+}
+
+.inzozi-platform-menu-card > div.active {
+  border-color: #4f7868;
+  background: rgba(145, 221, 191, .08);
+}
+
+.inzozi-platform-menu-card strong {
+  font-size: 10px;
+}
+
+.inzozi-platform-menu-card > div.active strong {
+  color: var(--accent, #91ddbf);
+}
+
+.inzozi-platform-menu-card small {
+  color: #7f8b87;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.inzozi-platform-product-shell {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.inzozi-platform-product-shell > .inzozi-delivery-shell {
+  height: 100%;
+}
+
+/* Current identity: Inzozi AI Coding is one product inside Inzozi AI Solution. */
+.inzozi-sync-brand strong,
+.app-shell .brand strong {
+  font-size: 0;
+}
+
+.inzozi-sync-brand strong::after {
+  content: 'Inzozi AI Coding';
+  font-size: 12px;
+}
+
+.inzozi-sync-brand small {
+  font-size: 0;
+}
+
+.inzozi-sync-brand small::after {
+  content: 'Inzozi AI Solution · synchronized delivery';
+  font-size: 9px;
+}
+
+.app-shell .brand strong::after {
+  content: 'Inzozi AI Coding';
+  font-size: 14px;
+}
+
+.app-shell .brand small {
+  font-size: 0;
+}
+
+.app-shell .brand small::after {
+  content: 'AI coding & engineering workspace';
+  font-size: 11px;
+}
+
+@media (max-width: 900px) {
+  .inzozi-platform-ribbon {
+    padding: 0 10px;
+  }
+
+  .inzozi-platform-breadcrumb > div:not(.inzozi-platform-current) small,
+  .inzozi-platform-actions .inzozi-platform-menu:first-of-type {
+    display: none;
+  }
+}
+
+@media (max-width: 620px) {
+  .inzozi-platform-frame {
+    grid-template-rows: 44px minmax(0, 1fr);
+  }
+
+  .inzozi-platform-breadcrumb {
+    gap: 5px;
+  }
+
+  .inzozi-platform-breadcrumb > div:nth-of-type(2),
+  .inzozi-platform-breadcrumb > .inzozi-platform-separator:first-of-type {
+    display: none;
+  }
+
+  .inzozi-platform-current small,
+  .inzozi-platform-actions .inzozi-platform-menu {
+    display: none;
+  }
+
+  .inzozi-back-engineering {
+    max-width: 170px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
