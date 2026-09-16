@@ -110,7 +110,6 @@ export default function AuthGate({ children }: AuthGateProps) {
         <section className="auth-card">
           <div className="auth-brand auth-brand-official">
             <img className="auth-brand-lockup" src="/brand/inzozi-ai-logo.webp" alt="Inzozi AI Solution" />
-            <div><strong>Inzozi AI Solution</strong><span>Private staging access</span></div>
           </div>
           <div className="auth-copy">
             <span className="auth-eyebrow">INZOZI AI SOLUTION</span>

@@ -213,10 +213,14 @@ jobs:
           grep -Fq 'content="Inzozi AI Solution"' index.html
           grep -Fq 'href="/brand/inzozi-ai-mark.webp"' index.html
           grep -Fq 'Opening Inzozi AI Solution…' src/AuthGate.tsx
-          grep -Fq '<strong>Inzozi AI Solution</strong>' src/AuthGate.tsx
+          grep -Fq 'className="auth-brand-lockup"' src/AuthGate.tsx
           grep -Fq 'Signed-in Inzozi AI Solution session' src/AuthGate.tsx
           grep -Fq "BRAND_NAME = 'Inzozi AI Solution'" src/unified-shell.ts
           grep -Fq "CONTROL_LABEL = 'Product Control'" src/unified-shell.ts
+          if grep -Fq 'Private staging access' src/AuthGate.tsx; then
+            echo 'legacy private staging access copy must not return beside the login lockup' >&2
+            exit 1
+          fi
           if grep -Fq '<title>Inzozi AI-Coding</title>' index.html; then
             echo 'legacy customer-facing title must not return' >&2
             exit 1
