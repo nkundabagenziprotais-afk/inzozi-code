@@ -19,6 +19,7 @@ import './brand.css'
 import './inzozi-engineering-experience.css'
 import './unified-shell'
 import './inzozi-engineering-experience'
+import './engineering-runtime-readiness'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
