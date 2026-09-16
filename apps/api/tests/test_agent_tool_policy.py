@@ -9,6 +9,7 @@ def test_read_only_modes_do_not_receive_write_or_command_tools() -> None:
     for mode in ("ask", "plan", "design", "review", "deploy"):
         names = tool_names(mode)
         assert names == {
+            "list_repository_tree",
             "search_repository",
             "read_repository_file",
             "inspect_git_status",
@@ -20,6 +21,7 @@ def test_read_only_modes_do_not_receive_write_or_command_tools() -> None:
 def test_build_and_debug_receive_only_guarded_mutation_tools() -> None:
     for mode in ("build", "debug"):
         names = tool_names(mode)
+        assert "list_repository_tree" in names
         assert "create_checkpoint" in names
         assert "write_repository_file" in names
         assert "run_guarded_action" in names

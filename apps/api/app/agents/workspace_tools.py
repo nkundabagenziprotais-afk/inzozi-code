@@ -83,6 +83,25 @@ async def fetch_git_diff(context: AquilaContext) -> str:
 
 
 @tool(timeout=35.0)
+async def list_repository_tree(ctx: RunContextWrapper[AquilaContext], path: str = "", limit: int = 100) -> str:
+    """List one directory in the connected repository without changing it.
+
+    Args:
+        path: Repository-relative directory path. Use an empty string for the repository root.
+        limit: Maximum entry count, from 1 to 200.
+    """
+    cleaned_path = path.strip().strip("/")
+    limit = min(max(limit, 1), 200)
+    payload = await workspace_request(
+        ctx.context,
+        "GET",
+        "/tree",
+        params={"path": cleaned_path, "limit": limit},
+    )
+    return json.dumps(payload or {"path": cleaned_path, "entries": []}, ensure_ascii=False)
+
+
+@tool(timeout=35.0)
 async def search_repository(ctx: RunContextWrapper[AquilaContext], query: str, limit: int = 40) -> str:
     """Search UTF-8 source text in the connected repository.
 
@@ -176,7 +195,7 @@ async def run_guarded_action(ctx: RunContextWrapper[AquilaContext], action: str)
 def tools_for_mode(mode: str, has_workspace: bool) -> list:
     if not has_workspace:
         return []
-    read_tools = [search_repository, read_repository_file, inspect_git_status, inspect_git_diff]
+    read_tools = [list_repository_tree, search_repository, read_repository_file, inspect_git_status, inspect_git_diff]
     if mode not in MUTATING_MODES:
         return read_tools
     return [*read_tools, create_checkpoint, write_repository_file, run_guarded_action]
