@@ -90,9 +90,15 @@ jobs:
 
           test "$(curl -fsS http://127.0.0.1:18081/health)" = 'ok'
           test "$(curl -fsS http://127.0.0.1:18081/ready)" = 'ready'
+
+          test "$(docker exec inzozi-digital-platform-web-ci stat -c '%a' /usr/share/nginx/html/index.html)" = '644'
+          test "$(docker exec inzozi-digital-platform-web-ci stat -c '%a' /usr/share/nginx/html/styles.css)" = '644'
+          test "$(docker exec inzozi-digital-platform-web-ci stat -c '%a' /usr/share/nginx/html/app.js)" = '644'
+
           curl -fsS http://127.0.0.1:18081/ | grep -q 'One digital home.'
           curl -fsS http://127.0.0.1:18081/ | grep -q 'Inzozi AI Coding'
 
+          echo 'PLATFORM_STATIC_FILE_PERMISSIONS=PASS'
           echo 'PLATFORM_WEB_RUNTIME=PASS'
 
       - name: Validate platform Compose override
