@@ -1,0 +1,117 @@
+/*
+ * Engineering conversation workspace sizing.
+ *
+ * The AI response and prompt areas need enough room for real implementation
+ * plans, reviews, and build/debug instructions without making the editor
+ * unusable. These rules intentionally override the base Engineering layout
+ * only after the normal shell styles have loaded.
+ */
+
+@media (min-width: 1081px) {
+  .inzozi-delivery-body .studio-engineering-mode .workspace {
+    grid-template-columns: 250px minmax(420px, 1fr) clamp(440px, 35vw, 560px);
+  }
+
+  .inzozi-delivery-body .studio-engineering-mode .aquila {
+    min-width: 440px;
+  }
+}
+
+@media (min-width: 1441px) {
+  .inzozi-delivery-body .studio-engineering-mode .workspace {
+    grid-template-columns: 270px minmax(520px, 1fr) clamp(480px, 32vw, 600px);
+  }
+
+  .inzozi-delivery-body .studio-engineering-mode .aquila {
+    min-width: 480px;
+  }
+}
+
+.inzozi-delivery-body .studio-engineering-mode .agent-output {
+  flex: 1 1 auto;
+  min-height: 240px;
+  padding: 18px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.inzozi-delivery-body .studio-engineering-mode .agent-output p {
+  margin: 14px 0 18px;
+  color: #d6e0ec;
+  font-size: 13px;
+  line-height: 1.72;
+  overflow-wrap: anywhere;
+}
+
+.inzozi-delivery-body .studio-engineering-mode .context-card {
+  margin-top: 18px;
+}
+
+.inzozi-delivery-body .studio-engineering-mode .prompt-box {
+  flex: 0 0 auto;
+  margin: 12px;
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(2, 6, 23, 0.16);
+}
+
+.inzozi-delivery-body .studio-engineering-mode .prompt-box textarea {
+  min-height: 160px;
+  height: clamp(160px, 18vh, 240px);
+  max-height: 34vh;
+  padding: 14px 14px 16px;
+  resize: vertical;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.inzozi-delivery-body .studio-engineering-mode .prompt-box > div {
+  min-height: 44px;
+  padding: 9px 10px;
+}
+
+.inzozi-delivery-body .studio-engineering-mode .prompt-box button {
+  min-height: 32px;
+  padding-inline: 12px;
+}
+
+@media (max-width: 1080px) {
+  .inzozi-delivery-body .studio-engineering-mode .agent-output {
+    min-height: 220px;
+  }
+
+  .inzozi-delivery-body .studio-engineering-mode .prompt-box textarea {
+    min-height: 140px;
+    height: 170px;
+    max-height: 300px;
+  }
+}
+
+@media (max-width: 900px) {
+  .inzozi-delivery-body .studio-engineering-mode .aquila {
+    min-height: 620px;
+  }
+
+  .inzozi-delivery-body .studio-engineering-mode .agent-output {
+    min-height: 260px;
+  }
+}
+
+@media (max-width: 540px) {
+  .inzozi-delivery-body .studio-engineering-mode .agent-output {
+    min-height: 230px;
+    padding: 14px;
+  }
+
+  .inzozi-delivery-body .studio-engineering-mode .prompt-box {
+    margin: 8px;
+  }
+
+  .inzozi-delivery-body .studio-engineering-mode .prompt-box textarea {
+    min-height: 132px;
+    height: 150px;
+    max-height: 260px;
+    padding: 12px;
+    font-size: 12px;
+  }
+}
