@@ -28,6 +28,17 @@ ENGINEERING_EVENT_TYPES = frozenset(
         "agent_run_completed",
     }
 )
+ENGINEERING_PROGRESS_EVENT_TYPES = frozenset(
+    {
+        "workspace_opened",
+        "command_completed",
+        "git_review_prepared",
+        "commit_created",
+        "push_completed",
+        "pull_request_created",
+        "agent_run_completed",
+    }
+)
 ENGINEERING_EVENT_STATUSES = frozenset({"info", "success", "failure"})
 ENGINEERING_SYNC_STATUSES = frozenset({"ready", "active", "attention"})
 
@@ -300,13 +311,25 @@ def _read_module_delivery(cursor, *, product_id: str) -> tuple[list[dict[str, An
 def _read_summary(cursor, *, product_id: str) -> dict[str, Any]:
     cursor.execute(
         """
-        SELECT b.binding_id, b.product_id, b.module_id, m.name AS module_name,
+        SELECT b.binding_id, b.product_id,
+               COALESCE(md.module_id, b.module_id) AS module_id,
+               COALESCE(assigned_module.name, bound_module.name) AS module_name,
                b.deliverable_id, d.title AS deliverable_title,
                b.repository_url, b.workspace_id, b.repository_ref,
                b.sync_status, b.created_at, b.updated_at
         FROM aquila_product_engineering_bindings b
-        LEFT JOIN aquila_product_modules m ON m.module_id = b.module_id
-        LEFT JOIN aquila_product_deliverables d ON d.deliverable_id = b.deliverable_id
+        LEFT JOIN aquila_product_module_deliverables md
+          ON md.product_id = b.product_id
+         AND md.deliverable_id = b.deliverable_id
+        LEFT JOIN aquila_product_modules assigned_module
+          ON assigned_module.product_id = b.product_id
+         AND assigned_module.module_id = md.module_id
+        LEFT JOIN aquila_product_modules bound_module
+          ON bound_module.product_id = b.product_id
+         AND bound_module.module_id = b.module_id
+        LEFT JOIN aquila_product_deliverables d
+          ON d.product_id = b.product_id
+         AND d.deliverable_id = b.deliverable_id
         WHERE b.product_id = %s
         """,
         (product_id,),
@@ -552,10 +575,13 @@ def update_engineering_binding(
                 id_column="deliverable_id",
                 label="Deliverable",
             )
+            module_candidate = (
+                str(module_id) if module_id is not None else None
+            ) if ("module_id" in changes or deliverable_id is None) else None
             module_id = _resolve_module_for_deliverable(
                 cursor,
                 product_id=product_id,
-                module_id=str(module_id) if module_id is not None else None,
+                module_id=module_candidate,
                 deliverable_id=str(deliverable_id) if deliverable_id is not None else None,
             )
 
@@ -677,7 +703,11 @@ def record_engineering_event(
                 ),
             )
 
-            if status != "failure":
+            qualifies_for_progress = (
+                status != "failure"
+                and event_type in ENGINEERING_PROGRESS_EVENT_TYPES
+            )
+            if qualifies_for_progress:
                 if module_id:
                     cursor.execute(
                         """
@@ -697,7 +727,13 @@ def record_engineering_event(
                         (deliverable_id, product_id),
                     )
 
-            sync_status = "attention" if status == "failure" else "active"
+            sync_status = (
+                "attention"
+                if status == "failure"
+                else "active"
+                if qualifies_for_progress
+                else binding["sync_status"]
+            )
             cursor.execute(
                 """
                 UPDATE aquila_product_engineering_bindings

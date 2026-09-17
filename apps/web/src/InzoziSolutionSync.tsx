@@ -186,6 +186,9 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
   const moduleIdRef = useRef('')
   const deliverableIdRef = useRef('')
   const surfaceRef = useRef<Surface>('control')
+  const contextSelectionTouchedRef = useRef(false)
+  const handoffApprovedRef = useRef(false)
+  const handoffInFlightRef = useRef(false)
 
   function syncProductState(product: ProductSnapshot) {
     activeProductRef.current = product
@@ -205,12 +208,14 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
       if (!response.ok) throw new Error(`Synchronization unavailable (${response.status})`)
       const payload = await response.json() as EngineeringSummary
       setSummary(payload)
-      const nextModule = payload.binding?.module_id ?? ''
-      const nextDeliverable = payload.binding?.deliverable_id ?? ''
-      moduleIdRef.current = nextModule
-      deliverableIdRef.current = nextDeliverable
-      setModuleId(nextModule)
-      setDeliverableId(nextDeliverable)
+      if (!contextSelectionTouchedRef.current) {
+        const nextModule = payload.binding?.module_id ?? ''
+        const nextDeliverable = payload.binding?.deliverable_id ?? ''
+        moduleIdRef.current = nextModule
+        deliverableIdRef.current = nextDeliverable
+        setModuleId(nextModule)
+        setDeliverableId(nextDeliverable)
+      }
       setMessage('')
       return payload
     } catch (error) {
@@ -326,6 +331,7 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
     const changedProduct = activeProductRef.current?.product_id !== payload.product_id
     syncProductState(payload)
     if (changedProduct) {
+      contextSelectionTouchedRef.current = false
       moduleIdRef.current = ''
       deliverableIdRef.current = ''
       setModuleId('')
@@ -534,6 +540,20 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
         || text.includes('Continue in Engineering Space')
       ) {
         const product = activeProductRef.current
+
+        if (handoffApprovedRef.current) {
+          handoffApprovedRef.current = false
+          surfaceRef.current = 'engineering'
+          setSurface('engineering')
+          return
+        }
+
+        if (handoffInFlightRef.current) {
+          event.preventDefault()
+          event.stopImmediatePropagation()
+          return
+        }
+
         if (product && (!moduleIdRef.current || !deliverableIdRef.current)) {
           event.preventDefault()
           event.stopImmediatePropagation()
@@ -545,20 +565,59 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
           return
         }
 
-        surfaceRef.current = 'engineering'
-        setSurface('engineering')
-        if (product) {
-          void updateBinding(product.product_id, {
-            module_id: moduleIdRef.current || null,
-            deliverable_id: deliverableIdRef.current || null,
-          }).then(() => recordEvent(
-            product.product_id,
-            'engineering_opened',
-            'info',
-            'Engineering Space opened from Project Control.',
-            {},
-          ))
+        if (!product) return
+
+        const selectedModuleId = moduleIdRef.current
+        const selectedDeliverableId = deliverableIdRef.current
+        const selectedDelivery = summary?.delivery_deliverables.find(
+          (item) => item.deliverable_id === selectedDeliverableId,
+        )
+
+        if (!selectedDelivery || selectedDelivery.module_id !== selectedModuleId) {
+          event.preventDefault()
+          event.stopImmediatePropagation()
+          setMessage(
+            'The selected deliverable is not bound to the selected module. '
+            + 'Product Control context was preserved; refresh and select the intended work again.',
+          )
+          void loadEngineeringSummary(product.product_id)
+          return
         }
+
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        handoffInFlightRef.current = true
+
+        void (async () => {
+          const bound = await updateBinding(product.product_id, {
+            module_id: selectedModuleId,
+            deliverable_id: selectedDeliverableId,
+          })
+          handoffInFlightRef.current = false
+
+          if (
+            !bound?.binding
+            || bound.binding.module_id !== selectedModuleId
+            || bound.binding.deliverable_id !== selectedDeliverableId
+          ) {
+            setMessage(
+              'Engineering handoff was stopped because the persisted module '
+              + 'and deliverable context did not match the selected work.',
+            )
+            return
+          }
+
+          contextSelectionTouchedRef.current = true
+          moduleIdRef.current = selectedModuleId
+          deliverableIdRef.current = selectedDeliverableId
+          setModuleId(selectedModuleId)
+          setDeliverableId(selectedDeliverableId)
+          setSummary(bound)
+          setMessage('')
+
+          handoffApprovedRef.current = true
+          button.click()
+        })()
         return
       }
 
@@ -585,10 +644,11 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
 
     document.addEventListener('click', onClick, true)
     return () => document.removeEventListener('click', onClick, true)
-  }, [loadEngineeringSummary, recordEvent, refreshProduct, updateBinding])
+  }, [loadEngineeringSummary, refreshProduct, summary, updateBinding])
 
   async function changeModule(value: string) {
     const product = activeProductRef.current
+    contextSelectionTouchedRef.current = true
     moduleIdRef.current = value
     setModuleId(value)
 
@@ -610,6 +670,8 @@ export default function InzoziSolutionSync({ children }: { children: ReactNode }
   async function changeDeliverable(value: string) {
     const product = activeProductRef.current
     if (!product || !canEdit) return
+
+    contextSelectionTouchedRef.current = true
 
     if (!value) {
       deliverableIdRef.current = ''
