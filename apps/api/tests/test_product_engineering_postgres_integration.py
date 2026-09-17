@@ -176,7 +176,41 @@ def test_module_deliverable_creation_is_atomic_sequenced_and_handoff_ready():
         summary="Engineering Space opened for the planned module deliverable.",
         evidence={},
     )
-    refreshed = get_product_snapshot(product_id=solution["product_id"], organization_id="org-a")
+    navigation_only = get_product_snapshot(
+        product_id=solution["product_id"],
+        organization_id="org-a",
+    )
+    navigation_deliverable = next(
+        item for item in navigation_only["deliverables"]
+        if item["deliverable_id"] == deliverable["deliverable_id"]
+    )
+    navigation_module = next(
+        item for item in navigation_only["modules"]
+        if item["module_id"] == module["module_id"]
+    )
+    assert navigation_deliverable["status"] == "planned"
+    assert navigation_module["status"] == "planned"
+
+    navigation_summary = get_engineering_summary(
+        product_id=solution["product_id"],
+        organization_id="org-a",
+    )
+    assert navigation_summary["evidence_count"] == 1
+    assert navigation_summary["sync_health"] == "ready"
+
+    record_engineering_event(
+        product_id=solution["product_id"],
+        organization_id="org-a",
+        event_type="workspace_opened",
+        status="success",
+        summary="Guarded Engineering Space workspace opened.",
+        evidence={"workspace_id": "workspace-issue-108"},
+    )
+
+    refreshed = get_product_snapshot(
+        product_id=solution["product_id"],
+        organization_id="org-a",
+    )
     refreshed_deliverable = next(
         item for item in refreshed["deliverables"]
         if item["deliverable_id"] == deliverable["deliverable_id"]
@@ -387,3 +421,67 @@ def test_engineering_sync_is_organization_scoped_and_rejects_foreign_children():
             summary="Unauthorized cross-organization event.",
             evidence={},
         )
+def test_engineering_binding_uses_persisted_deliverable_module_and_rejects_mismatch():
+    solution = _create_solution()
+    first_module, second_module = solution["modules"][:2]
+
+    created = create_module_deliverable(
+        product_id=solution["product_id"],
+        organization_id="org-a",
+        module_id=first_module["module_id"],
+        title="Issue 108 context integrity",
+        description="Verify exact module and deliverable context across Engineering handoff.",
+    )
+    deliverable = next(
+        item for item in created["delivery_deliverables"]
+        if item["title"] == "Issue 108 context integrity"
+    )
+
+    bound = update_engineering_binding(
+        product_id=solution["product_id"],
+        organization_id="org-a",
+        changes={
+            "module_id": first_module["module_id"],
+            "deliverable_id": deliverable["deliverable_id"],
+        },
+    )
+    assert bound["binding"]["module_id"] == first_module["module_id"]
+
+    with pytest.raises(ProductValidationError):
+        update_engineering_binding(
+            product_id=solution["product_id"],
+            organization_id="org-a",
+            changes={
+                "module_id": second_module["module_id"],
+                "deliverable_id": deliverable["deliverable_id"],
+            },
+        )
+
+    # Simulate historical/stale binding state. Reading synchronization must
+    # resolve the displayed module from the persisted deliverable assignment.
+    with psycopg.connect(DATABASE_URL, autocommit=True) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE aquila_product_engineering_bindings
+                SET module_id = %s
+                WHERE product_id = %s
+                """,
+                (second_module["module_id"], solution["product_id"]),
+            )
+
+    resolved = get_engineering_summary(
+        product_id=solution["product_id"],
+        organization_id="org-a",
+    )
+    assert resolved["binding"]["module_id"] == first_module["module_id"]
+    assert resolved["binding"]["module_name"] == first_module["name"]
+    assert resolved["binding"]["deliverable_id"] == deliverable["deliverable_id"]
+
+    repaired = update_engineering_binding(
+        product_id=solution["product_id"],
+        organization_id="org-a",
+        changes={"repository_ref": "main"},
+    )
+    assert repaired["binding"]["module_id"] == first_module["module_id"]
+    assert repaired["binding"]["deliverable_id"] == deliverable["deliverable_id"]
