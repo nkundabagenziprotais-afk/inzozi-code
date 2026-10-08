@@ -22,9 +22,11 @@ def test_build_and_debug_receive_only_guarded_mutation_tools() -> None:
     for mode in ("build", "debug"):
         names = tool_names(mode)
         assert "list_repository_tree" in names
+        assert "create_feature_branch" in names
         assert "create_checkpoint" in names
         assert "write_repository_file" in names
         assert "run_guarded_action" in names
+        assert "create_feature_branch" in names
         assert "run_shell" not in names
         assert "execute_command" not in names
         assert "rm" not in names
