@@ -184,23 +184,90 @@ def _assert_child_belongs_to_product(
         raise ProductValidationError(f"{label} does not belong to this product")
 
 
-def _module_proposals(cursor, *, product_id: str) -> list[dict[str, str]]:
-    """Return review-only starting modules; nothing is persisted until explicitly added."""
+def _proposal_catalog(text: str, capabilities: set[str]) -> list[tuple[str, str, str]]:
+    """Return review-only module suggestions using high-confidence product signals.
 
-    cursor.execute(
-        """
-        SELECT p.name, b.concept, b.capabilities
-        FROM aquila_products p
-        LEFT JOIN aquila_product_blueprints b ON b.product_id = p.product_id
-        WHERE p.product_id = %s
-        """,
-        (product_id,),
+    Broad audience words such as ``student`` or ``academic`` are intentionally not
+    school classifiers on their own. Products such as knowledge workspaces may
+    legitimately serve those audiences without being school-management systems.
+    """
+
+    normalized = text.casefold()
+    knowledge_signals = (
+        "notebook",
+        "knowledge workspace",
+        "coremind",
+        "timestamped transcript",
+        "transcript",
+        "source provenance",
+        "mind map",
+        "workbench",
+        "document library",
     )
-    product = cursor.fetchone() or {}
-    text = f"{product.get('name') or ''} {product.get('concept') or ''}".casefold()
-    capabilities = set(product.get("capabilities") or [])
+    school_signals = (
+        "school management",
+        "primary school",
+        "secondary school",
+        "student admissions",
+        "school fees",
+        "parent/student",
+        "parent / student",
+        "class attendance",
+        "academic progression",
+    )
 
-    if any(token in text for token in ("school", "student", "education", "academic")):
+    knowledge_score = sum(signal in normalized for signal in knowledge_signals)
+    school_score = sum(signal in normalized for signal in school_signals)
+
+    if knowledge_score >= 2:
+        proposals = [
+            (
+                "Notebook & Knowledge Capture",
+                "Create notebooks and pages with rich text, attachments, structured knowledge objects and source-linked notes.",
+                "must_have",
+            ),
+            (
+                "Audio, Transcript & Moment Capture",
+                "Record while writing, preserve timestamps, mark important moments and insert selected transcript passages into notes.",
+                "must_have",
+            ),
+            (
+                "Library & Source Reader",
+                "Organize documents and books, read and annotate sources, and preserve durable source references and provenance.",
+                "must_have",
+            ),
+            (
+                "CoreMind & Provenance",
+                "Provide source-grounded retrieval, reasoning and creation while distinguishing source truth, user content and AI interpretation.",
+                "must_have",
+            ),
+            (
+                "Search & Retrieval",
+                "Search and retrieve notes, documents, transcript moments, annotations and linked knowledge across the workspace.",
+                "must_have",
+            ),
+            (
+                "Workbench & Research",
+                "Let users select trusted context for comparison, synthesis, research and optional clearly separated web evidence.",
+                "should_have",
+            ),
+            (
+                "Visual Thinking",
+                "Support mind maps, whiteboards, concept maps, process views and stylus or freehand visual thinking.",
+                "should_have",
+            ),
+            (
+                "Projects, Meetings & Output Creation",
+                "Turn knowledge into meeting records, project actions, reports, documents and presentation-ready outputs.",
+                "should_have",
+            ),
+            (
+                "Collaboration & Controlled Sharing",
+                "Share selected knowledge with explicit permissions while preserving ownership, provenance and auditability.",
+                "good_to_have",
+            ),
+        ]
+    elif "school management" in normalized or school_score >= 2:
         proposals = [
             ("Admissions & Enrollment", "Manage applications, admissions, enrollment and student intake.", "must_have"),
             ("Student Management", "Maintain student profiles, guardians, classes and lifecycle records.", "must_have"),
@@ -210,7 +277,7 @@ def _module_proposals(cursor, *, product_id: str) -> list[dict[str, str]]:
             ("Parent / Student Portal", "Provide self-service access to results, balances, notices and requests.", "should_have"),
             ("Reporting & Analytics", "Provide operational and management reporting across the school.", "good_to_have"),
         ]
-    elif any(token in text for token in ("farm", "agri", "crop", "livestock", "farmer")):
+    elif any(token in normalized for token in ("farm", "agri", "crop", "livestock", "farmer")):
         proposals = [
             ("Farm & Plot Registry", "Maintain farms, plots, locations, ownership and production units.", "must_have"),
             ("Farmer / Owner Management", "Maintain farmer, owner, worker and stakeholder profiles.", "must_have"),
@@ -232,6 +299,25 @@ def _module_proposals(cursor, *, product_id: str) -> list[dict[str, str]]:
             proposals.append(
                 ("External Integrations", "Coordinate partner and third-party service integrations.", "good_to_have")
             )
+    return proposals
+
+
+def _module_proposals(cursor, *, product_id: str) -> list[dict[str, str]]:
+    """Return review-only starting modules; nothing is persisted until explicitly added."""
+
+    cursor.execute(
+        """
+        SELECT p.name, b.concept, b.capabilities
+        FROM aquila_products p
+        LEFT JOIN aquila_product_blueprints b ON b.product_id = p.product_id
+        WHERE p.product_id = %s
+        """,
+        (product_id,),
+    )
+    product = cursor.fetchone() or {}
+    text = f"{product.get('name') or ''} {product.get('concept') or ''}"
+    capabilities = set(product.get("capabilities") or [])
+    proposals = _proposal_catalog(text, capabilities)
 
     cursor.execute(
         "SELECT LOWER(name) AS name FROM aquila_product_modules WHERE product_id = %s",
