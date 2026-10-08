@@ -13,6 +13,7 @@ MUTATING_MODES = {"build", "debug"}
 APPROVED_ACTIONS = {
     "python_compile",
     "python_tests",
+    "node_prepare",
     "node_build",
     "node_test",
     "node_lint",
@@ -179,16 +180,35 @@ async def write_repository_file(
 
 
 @tool(timeout=190.0)
-async def run_guarded_action(ctx: RunContextWrapper[AquilaContext], action: str) -> str:
+async def run_guarded_action(ctx: RunContextWrapper[AquilaContext], action: str, cwd: str = "") -> str:
     """Run one named, pre-approved build or test recipe in the guarded workspace.
 
     Args:
-        action: One of python_compile, python_tests, node_build, node_test, node_lint, php_tests,
-            or composer_validate. Arbitrary shell commands are never accepted.
+        action: One of python_compile, python_tests, node_prepare, node_build, node_test, node_lint,
+            php_tests, or composer_validate. Arbitrary shell commands are never accepted.
+        cwd: Optional repository-relative working directory such as ``backend`` or ``frontend``.
     """
     if action not in ctx.context.allowed_actions:
         return f"Denied: action {action!r} is not approved for {ctx.context.mode.upper()} mode."
-    payload = await workspace_request(ctx.context, "POST", "/actions", payload={"action": action})
+    cleaned_cwd = cwd.strip().strip("/")
+    capabilities = await workspace_request(
+        ctx.context,
+        "GET",
+        "/actions/capabilities",
+        params={"cwd": cleaned_cwd},
+    ) or {}
+    capability = next(
+        (item for item in capabilities.get("actions", []) if isinstance(item, dict) and item.get("action") == action),
+        None,
+    )
+    if capability and capability.get("available") is False:
+        return json.dumps({"action": action, "available": False, "reason": capability.get("reason")}, ensure_ascii=False)
+    payload = await workspace_request(
+        ctx.context,
+        "POST",
+        "/actions",
+        payload={"action": action, "cwd": cleaned_cwd or None},
+    )
     return json.dumps(payload or {}, ensure_ascii=False)
 
 

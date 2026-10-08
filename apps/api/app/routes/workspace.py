@@ -29,6 +29,7 @@ PUBLIC_ACTIONS = {
     "git_log",
     "python_compile",
     "python_tests",
+    "node_prepare",
     "node_build",
     "node_test",
     "node_lint",
