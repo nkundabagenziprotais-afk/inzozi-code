@@ -12,6 +12,7 @@ from app.main import (
     _network_name,
     _quota_helper_run,
     _quota_host_path,
+    _review_protection_active,
     _runtime_name,
     _volume_name,
     _workspace_id,
@@ -126,3 +127,47 @@ def test_github_helpers_receive_fixed_proxy_environment(
     assert env["http_proxy"] == EGRESS_PROXY_URL
     assert env["NO_PROXY"] == ""
     assert env["no_proxy"] == ""
+
+
+class FakeExecResult:
+    def __init__(self, output: str, exit_code: int = 0):
+        self.exit_code = exit_code
+        self.output = output.encode("utf-8")
+
+
+class FakeReviewContainer(FakeContainer):
+    def __init__(self, expires_at: int, status_output: str, workspace_id: str = "a" * 32):
+        super().__init__(expires_at)
+        self.labels["com.inzozi.code.workspace_id"] = workspace_id
+        self.status_output = status_output
+
+    def exec_run(self, argv, stdout=True, stderr=True):
+        assert argv[:3] == ["git", "-C", f"/workspaces/{'a' * 32}/repo"]
+        return FakeExecResult(self.status_output)
+
+
+def test_expired_dirty_workspace_is_protected_during_review_grace(monkeypatch):
+    import app.main as broker_main
+
+    monkeypatch.setattr(broker_main, "REVIEW_GRACE_SECONDS", 3600)
+    now = int(time.time())
+    dirty = FakeReviewContainer(now - 60, "## feature/review\n M app.py\n")
+    assert _review_protection_active(dirty, now=now) is True
+
+
+def test_expired_clean_workspace_is_not_review_protected(monkeypatch):
+    import app.main as broker_main
+
+    monkeypatch.setattr(broker_main, "REVIEW_GRACE_SECONDS", 3600)
+    now = int(time.time())
+    clean = FakeReviewContainer(now - 60, "## main...origin/main\n")
+    assert _review_protection_active(clean, now=now) is False
+
+
+def test_review_protection_has_a_hard_upper_bound(monkeypatch):
+    import app.main as broker_main
+
+    monkeypatch.setattr(broker_main, "REVIEW_GRACE_SECONDS", 300)
+    now = int(time.time())
+    dirty = FakeReviewContainer(now - 301, "## feature/review\n M app.py\n")
+    assert _review_protection_active(dirty, now=now) is False

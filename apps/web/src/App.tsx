@@ -118,12 +118,23 @@ type PullRequestResult = {
   merged: boolean
   deployment_started: boolean
 }
+type WorkspaceLifecycle = {
+  workspace_id: string
+  expires_at: number
+  expired: boolean
+  review_protected: boolean
+  review_grace_until: number
+  cleanup_policy: string
+}
 type RecoverableWorkspace = {
   workspace_id: string
   repository_url: string
   ref?: string | null
   created_at: string
   runtime_status: 'ready' | 'unavailable'
+  expires_at?: number | null
+  review_grace_until?: number | null
+  review_protected?: boolean
 }
 type ApiError = { detail?: string }
 
@@ -232,6 +243,7 @@ export default function App() {
   const [repositoryHistory, setRepositoryHistory] = useState<RepositoryHistoryItem[]>(() => loadRepositoryHistory())
   const [repositoryPendingRemoval, setRepositoryPendingRemoval] = useState<RepositoryHistoryItem | null>(null)
   const [workspaceId, setWorkspaceId] = useState('')
+  const [workspaceLifecycle, setWorkspaceLifecycle] = useState<WorkspaceLifecycle | null>(null)
   const [recoverableWorkspaces, setRecoverableWorkspaces] = useState<RecoverableWorkspace[]>([])
   const [recoveryError, setRecoveryError] = useState('')
   const [treePath, setTreePath] = useState('')
@@ -335,6 +347,13 @@ export default function App() {
     setGitReviewMessage(message)
   }
 
+  async function loadWorkspaceLifecycle(id = workspaceId) {
+    if (!id) return null
+    const lifecycle = await api<WorkspaceLifecycle>(`/api/v1/workspaces/${id}/lifecycle`)
+    setWorkspaceLifecycle(lifecycle)
+    return lifecycle
+  }
+
   async function createWorkspace(repositoryUrlValue: string, repositoryRefValue: string) {
     const normalizedUrl = repositoryUrlValue.trim().replace(/\.git$/, '')
     const normalizedRef = repositoryRefValue.trim()
@@ -350,6 +369,7 @@ export default function App() {
         body: JSON.stringify({ repository_url: normalizedUrl, ref: normalizedRef || null }),
       })
       setWorkspaceId(payload.workspace_id)
+      await loadWorkspaceLifecycle(payload.workspace_id)
       setRepositoryHistory(rememberRepository(normalizedUrl, normalizedRef))
       setProjectPolicy(loadProjectPolicy(normalizedUrl))
       setBranchName(`feature/inzozi-change-${payload.workspace_id.slice(0, 6)}`)
@@ -656,6 +676,7 @@ export default function App() {
 
   function clearActiveWorkspaceState() {
     setWorkspaceId('')
+    setWorkspaceLifecycle(null)
     setEntries([])
     setTreePath('')
     setSelectedPath('')
@@ -685,6 +706,7 @@ export default function App() {
       const normalizedUrl = item.repository_url.replace(/\.git$/, '')
       const restoredRef = review?.branch?.trim() || item.ref?.trim() || ''
       setWorkspaceId(item.workspace_id)
+      await loadWorkspaceLifecycle(item.workspace_id)
       setRepositoryUrl(normalizedUrl)
       setRepositoryRef(restoredRef)
       setProjectPolicy(loadProjectPolicy(normalizedUrl))
@@ -862,11 +884,15 @@ export default function App() {
                         <small>
                           {item.ref || 'default branch'} · {historyTime(item.created_at)} · {item.workspace_id.slice(0, 8)} · {item.runtime_status}
                         </small>
-                        {item.runtime_status === 'unavailable' && (
+                        {item.review_protected && item.review_grace_until ? (
+                          <small className="recoverable-workspace-unavailable">
+                            Review state protected until {new Date(item.review_grace_until * 1000).toLocaleString()}.
+                          </small>
+                        ) : item.runtime_status === 'unavailable' ? (
                           <small className="recoverable-workspace-unavailable">
                             Runtime unavailable. Resume is disabled, but you can securely disconnect this workspace.
                           </small>
-                        )}
+                        ) : null}
                       </div>
                       <div className="recoverable-workspace-actions">
                         <button
@@ -1158,7 +1184,15 @@ export default function App() {
         ))}
       </section>
 
-      <footer><span>Workspace: {workspaceId ? `guarded · ${workspaceId.slice(0, 8)}` : 'disconnected'}</span><span>Route: {agentRoute}</span><span>Git: commit + push + draft PR approval gates</span><span className="healthy">● merge disabled</span></footer>
+      <footer>
+        <span>Workspace: {workspaceId ? `guarded · ${workspaceId.slice(0, 8)}` : 'disconnected'}</span>
+        {workspaceLifecycle?.expires_at ? (
+          <span title="Dirty or locally unpushed work receives a protected human-review grace window before destructive cleanup.">
+            Lease {new Date(workspaceLifecycle.expires_at * 1000).toLocaleTimeString()} · review protection to {new Date(workspaceLifecycle.review_grace_until * 1000).toLocaleTimeString()}
+          </span>
+        ) : null}
+        <span>Route: {agentRoute}</span><span>Git: commit + push + draft PR approval gates</span><span className="healthy">● merge disabled</span>
+      </footer>
 
       {repositoryPendingRemoval && (
         <RemoveRepositoryDialog

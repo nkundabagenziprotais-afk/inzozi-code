@@ -207,6 +207,12 @@ def test_recovery_returns_safe_fields_only(monkeypatch):
 
     async def fake_request(method: str, path: str, **_kwargs):
         assert method == "GET"
+        if path == f"/v1/workspaces/{OWN_ID}/lifecycle":
+            return {
+                "expires_at": 1788330000,
+                "review_grace_until": 1788416400,
+                "review_protected": True,
+            }
         assert path == f"/v1/workspaces/{OWN_ID}/metadata"
         return {
             "repository_url": "https://github.com/example/private-repo",
@@ -237,6 +243,9 @@ def test_recovery_returns_safe_fields_only(monkeypatch):
             "ref": "main",
             "created_at": "2026-09-02T10:00:00+00:00",
             "runtime_status": "ready",
+            "expires_at": 1788330000,
+            "review_grace_until": 1788416400,
+            "review_protected": True,
         }
         forbidden = {
             "owner_email",
