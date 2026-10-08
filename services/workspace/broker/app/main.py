@@ -39,6 +39,7 @@ MAX_FILE_BYTES = os.getenv("WORKSPACE_MAX_FILE_BYTES", "1048576")
 MAX_OUTPUT_BYTES = os.getenv("WORKSPACE_MAX_OUTPUT_BYTES", "65536")
 MAX_SEARCH_FILE_BYTES = os.getenv("WORKSPACE_MAX_SEARCH_FILE_BYTES", "524288")
 MAX_CHECKPOINT_BYTES = os.getenv("WORKSPACE_MAX_CHECKPOINT_BYTES", str(100 * 1024 * 1024))
+REVIEW_GRACE_SECONDS = int(os.getenv("WORKSPACE_REVIEW_GRACE_SECONDS", "86400"))
 
 GITHUB_HTTPS_RE = re.compile(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$")
 WORKSPACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -278,12 +279,76 @@ def _container_for(workspace_id: str):
     return container
 
 
-def _is_expired(container) -> bool:
+def _expires_at(container) -> int:
     try:
-        expires_at = int((container.labels or {}).get(LABEL_EXPIRES_AT, "0"))
+        return int((container.labels or {}).get(LABEL_EXPIRES_AT, "0"))
     except ValueError:
+        return 0
+
+
+def _is_expired(container, *, now: int | None = None) -> bool:
+    return _expires_at(container) <= (int(time.time()) if now is None else now)
+
+
+def _workspace_has_reviewable_state(container) -> bool:
+    """Fail-safe check for dirty or locally committed work that must not be discarded."""
+    workspace_id = (container.labels or {}).get(LABEL_WORKSPACE_ID, "")
+    if not WORKSPACE_ID_RE.fullmatch(workspace_id):
         return True
-    return expires_at <= int(time.time())
+    try:
+        result = container.exec_run(
+            [
+                "git",
+                "-C",
+                f"/workspaces/{workspace_id}/repo",
+                "status",
+                "--short",
+                "--branch",
+            ],
+            stdout=True,
+            stderr=True,
+        )
+    except DockerException:
+        return True
+    if getattr(result, "exit_code", 1) != 0:
+        return True
+    output = (getattr(result, "output", b"") or b"").decode("utf-8", errors="replace")
+    lines = [line for line in output.splitlines() if line.strip()]
+    header = lines[0] if lines and lines[0].startswith("##") else ""
+    dirty = any(not line.startswith("##") for line in lines)
+    locally_ahead = "[ahead " in header or "[gone]" in header
+    branch_name = header[3:].split("...", 1)[0].split(" ", 1)[0] if header.startswith("## ") else ""
+    local_branch_without_upstream = bool(
+        branch_name
+        and branch_name not in {"main", "master", "production", "prod"}
+        and "..." not in header
+    )
+    return dirty or locally_ahead or local_branch_without_upstream
+
+
+def _review_protection_active(container, *, now: int | None = None) -> bool:
+    current = int(time.time()) if now is None else now
+    expires_at = _expires_at(container)
+    if expires_at <= 0 or current <= expires_at:
+        return False
+    if current > expires_at + REVIEW_GRACE_SECONDS:
+        return False
+    return _workspace_has_reviewable_state(container)
+
+
+def _lifecycle_status_sync(workspace_id: str) -> dict:
+    container = _container_for(workspace_id)
+    now = int(time.time())
+    expires_at = _expires_at(container)
+    review_protected = _review_protection_active(container, now=now)
+    return {
+        "workspace_id": workspace_id,
+        "expires_at": expires_at,
+        "expired": expires_at <= now,
+        "review_protected": review_protected,
+        "review_grace_until": expires_at + REVIEW_GRACE_SECONDS if expires_at > 0 else 0,
+        "cleanup_policy": "dirty-or-unpushed-work-protected-during-review-grace",
+    }
 
 
 def _quota_helper_environment(*, workspace_id: str | None = None, limit_bytes: int | None = None) -> dict[str, str]:
@@ -396,7 +461,7 @@ def _destroy_sync(workspace_id: str) -> None:
 
 def _assert_live_sync(workspace_id: str):
     container = _container_for(workspace_id)
-    if _is_expired(container):
+    if _is_expired(container) and not _review_protection_active(container):
         _destroy_sync(workspace_id)
         raise HTTPException(status_code=410, detail="Workspace expired and was securely cleaned up")
     container.reload()
@@ -606,6 +671,8 @@ def _create_workspace_sync(payload: CreateWorkspaceRequest) -> dict:
         "disk_quota": "xfs-project-hard",
         "disk_limit_bytes": DISK_LIMIT_BYTES,
         "project_id": project_id,
+        "expires_at": payload.expires_at,
+        "review_grace_until": payload.expires_at + REVIEW_GRACE_SECONDS,
     }
 
 
@@ -725,8 +792,12 @@ async def _janitor() -> None:
                 workspace_id = (container.labels or {}).get(LABEL_WORKSPACE_ID, "")
                 if WORKSPACE_ID_RE.fullmatch(workspace_id):
                     try:
-                        await asyncio.to_thread(_destroy_sync, workspace_id)
+                        protected = await asyncio.to_thread(_review_protection_active, container)
+                        if not protected:
+                            await asyncio.to_thread(_destroy_sync, workspace_id)
                     except (DockerException, RuntimeError):
+                        # Fail safe for user work: an inspection failure must not become
+                        # a destructive cleanup decision inside the review grace window.
                         pass
 
 
@@ -794,6 +865,16 @@ def create_workspace(payload: CreateWorkspaceRequest, request: Request) -> dict:
         raise
     except (DockerException, RuntimeError) as exc:
         raise HTTPException(status_code=503, detail="Workspace broker failed closed during provisioning") from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/lifecycle")
+def workspace_lifecycle(workspace_id: str, request: Request) -> dict:
+    _require_manager(request)
+    try:
+        _workspace_id(workspace_id)
+        return _lifecycle_status_sync(workspace_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid workspace id") from exc
 
 
 @app.post("/v1/workspaces/{workspace_id}/git/push")

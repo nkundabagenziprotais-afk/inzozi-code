@@ -186,7 +186,17 @@ async def list_recoverable_workspaces(request: Request) -> dict:
             "ref": None,
             "created_at": ownership.created_at.isoformat(),
             "runtime_status": "unavailable",
+            "expires_at": None,
+            "review_grace_until": None,
+            "review_protected": False,
         }
+        try:
+            lifecycle = await _request("GET", f"/v1/workspaces/{ownership.workspace_id}/lifecycle") or {}
+            item["expires_at"] = lifecycle.get("expires_at")
+            item["review_grace_until"] = lifecycle.get("review_grace_until")
+            item["review_protected"] = lifecycle.get("review_protected") is True
+        except HTTPException:
+            pass
         try:
             metadata = await _request("GET", f"/v1/workspaces/{ownership.workspace_id}/metadata") or {}
         except HTTPException:
@@ -223,6 +233,12 @@ async def create_workspace(request: Request) -> dict:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     payload = await _request("POST", "/v1/workspaces", json=body)
+    return payload or {}
+
+
+@router.get("/{workspace_id}/lifecycle")
+async def workspace_lifecycle(workspace_id: str) -> dict:
+    payload = await _request("GET", f"/v1/workspaces/{workspace_id}/lifecycle")
     return payload or {}
 
 

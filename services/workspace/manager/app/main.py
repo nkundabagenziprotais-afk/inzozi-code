@@ -213,7 +213,20 @@ async def create_workspace(payload: CreateWorkspaceRequest, request: Request) ->
         "disk_quota": broker_result.get("disk_quota", "unknown"),
         "disk_limit_bytes": broker_result.get("disk_limit_bytes"),
         "expires_at": datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat(),
+        "review_grace_until": datetime.fromtimestamp(
+            int(broker_result.get("review_grace_until", expires_at)), tz=timezone.utc
+        ).isoformat(),
     }
+
+
+@app.get("/v1/workspaces/{workspace_id}/lifecycle")
+async def workspace_lifecycle(workspace_id: str, request: Request) -> dict:
+    _require_api_client(request)
+    try:
+        _workspace_id(workspace_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid workspace id") from exc
+    return await _broker_request("GET", f"/v1/workspaces/{workspace_id}/lifecycle") or {}
 
 
 @app.post("/v1/workspaces/{workspace_id}/git/push")
