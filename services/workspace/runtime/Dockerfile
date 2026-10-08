@@ -27,6 +27,9 @@ RUN mkdir -p /opt/inzozi-node \
         @testing-library/react@16.1.0 @testing-library/jest-dom@6.6.3 \
         @testing-library/user-event@14.5.2 \
         @types/react@18.3.18 @types/react-dom@18.3.5 \
+        @tiptap/core@3.31.4 @tiptap/react@3.31.4 @tiptap/pm@3.31.4 \
+        @tiptap/starter-kit@3.31.4 @tiptap/extension-link@3.31.4 \
+        dexie@4.4.6 fake-indexeddb@6.2.5 uuid@14.0.2 \
     && chmod -R a+rX /opt/inzozi-node
 
 COPY app ./app
