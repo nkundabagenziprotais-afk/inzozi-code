@@ -20,3 +20,10 @@ def test_path_escape_is_rejected(tmp_path: Path) -> None:
     workspace.mkdir()
     with pytest.raises(PolicyError):
         resolve_inside(workspace, "../outside")
+
+
+def test_node_prepare_uses_runtime_absolute_script_path() -> None:
+    recipe = recipe_for("node_prepare")
+    assert recipe.argv == ("python", "/runtime/app/node_prepare.py")
+    assert "sh" not in recipe.argv
+    assert "bash" not in recipe.argv
