@@ -31,6 +31,7 @@ def test_build_and_debug_receive_only_guarded_mutation_tools() -> None:
         assert allowed_actions_for_mode(mode) == frozenset({
             "python_compile",
             "python_tests",
+            "node_prepare",
             "node_build",
             "node_test",
             "node_lint",

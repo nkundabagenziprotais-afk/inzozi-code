@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -127,6 +128,21 @@ def _run(argv: tuple[str, ...] | list[str], cwd: Path, timeout: int, extra_env: 
     except subprocess.TimeoutExpired as exc:
         output = (exc.stdout or b"")[-MAX_OUTPUT_BYTES:].decode("utf-8", errors="replace")
         return {"exit_code": 124, "output": output, "timed_out": True}
+    except FileNotFoundError:
+        executable = str(argv[0]) if argv else "unknown"
+        return {
+            "exit_code": 127,
+            "output": f"Required executable is unavailable in the guarded runtime: {executable}",
+            "timed_out": False,
+            "unavailable": True,
+        }
+    except OSError as exc:
+        return {
+            "exit_code": 126,
+            "output": f"Guarded action could not start safely: {exc}",
+            "timed_out": False,
+            "unavailable": True,
+        }
     output = completed.stdout[-MAX_OUTPUT_BYTES:].decode("utf-8", errors="replace")
     return {"exit_code": completed.returncode, "output": output, "timed_out": False}
 
@@ -351,6 +367,48 @@ def write_file(workspace_id: str, file_path: str, request: WriteFileRequest) -> 
     digest = hashlib.sha256(encoded).hexdigest()
     _audit(workspace_id, "file.write", {"path": file_path, "sha256": digest, "bytes": len(encoded)})
     return {"path": file_path, "sha256": digest, "bytes": len(encoded)}
+
+
+def _action_capability(action: str, cwd: Path) -> dict:
+    try:
+        recipe = recipe_for(action)
+    except PolicyError as exc:
+        return {"action": action, "available": False, "reason": str(exc)}
+
+    executable = shutil.which(recipe.argv[0])
+    if executable is None:
+        return {
+            "action": action,
+            "available": False,
+            "reason": f"Required executable is unavailable: {recipe.argv[0]}",
+        }
+
+    if action == "python_tests" and importlib.util.find_spec("pytest") is None:
+        return {"action": action, "available": False, "reason": "pytest is unavailable in the guarded runtime"}
+
+    if action.startswith("node_"):
+        if not (cwd / "package.json").is_file():
+            return {"action": action, "available": False, "reason": "package.json is not present in this working directory"}
+        if action != "node_prepare" and not (cwd / "node_modules").exists():
+            return {"action": action, "available": False, "reason": "Node dependencies are not prepared; run node_prepare first"}
+
+    return {"action": action, "available": True, "reason": None}
+
+
+@app.get("/v1/workspaces/{workspace_id}/actions/capabilities")
+def action_capabilities(workspace_id: str, cwd: str | None = None) -> dict:
+    repo = _repo_path(workspace_id)
+    try:
+        target = resolve_inside(repo, cwd)
+    except PolicyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not target.is_dir():
+        raise HTTPException(status_code=404, detail="Working directory not found")
+    actions = [
+        "python_compile", "python_tests", "node_prepare", "node_build", "node_test",
+        "node_lint", "php_tests", "composer_validate",
+    ]
+    return {"cwd": cwd or "", "actions": [_action_capability(action, target) for action in actions]}
 
 
 @app.post("/v1/workspaces/{workspace_id}/actions")

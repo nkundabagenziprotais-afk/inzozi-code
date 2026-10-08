@@ -5,12 +5,30 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     WORKSPACE_ROOT=/workspaces
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates \
+    && apt-get install -y --no-install-recommends git ca-certificates nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /runtime
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir '.[dev]' \
+    && pip install --no-cache-dir \
+        'sqlalchemy>=2.0,<3' \
+        'alembic>=1.13,<2' \
+        'psycopg[binary]>=3.2,<4' \
+        'pydantic[email]>=2.9,<3'
+
+RUN mkdir -p /opt/inzozi-node \
+    && cd /opt/inzozi-node \
+    && npm init -y >/dev/null 2>&1 \
+    && npm install --save-exact --no-audit --no-fund \
+        react@18.3.1 react-dom@18.3.1 \
+        @vitejs/plugin-react@4.3.4 vite@6.0.7 typescript@5.7.3 \
+        vitest@2.1.8 jsdom@25.0.1 \
+        @testing-library/react@16.1.0 @testing-library/jest-dom@6.6.3 \
+        @testing-library/user-event@14.5.2 \
+        @types/react@18.3.18 @types/react-dom@18.3.5 \
+    && chmod -R a+rX /opt/inzozi-node
+
 COPY app ./app
 
 # Docker COPY preserves build-context modes. Normalize the runtime
