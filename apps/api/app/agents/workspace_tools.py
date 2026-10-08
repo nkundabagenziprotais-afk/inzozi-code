@@ -142,6 +142,27 @@ async def inspect_git_diff(ctx: RunContextWrapper[AquilaContext]) -> str:
 
 
 @tool(timeout=40.0)
+async def create_feature_branch(ctx: RunContextWrapper[AquilaContext], branch_name: str) -> str:
+    """Create one safe feature/fix/ui/hotfix/deploy branch through the guarded Git workflow.
+
+    This tool is available only in Build or Debug mode and delegates all branch-name
+    validation and protected-branch enforcement to the existing workspace API.
+
+    Args:
+        branch_name: Safe branch name such as ``feature/notebook-foundation``.
+    """
+    if ctx.context.mode not in MUTATING_MODES:
+        return "Denied: branch creation is only available in Build or Debug mode."
+    payload = await workspace_request(
+        ctx.context,
+        "POST",
+        "/git/branches",
+        payload={"branch_name": branch_name.strip()},
+    )
+    return json.dumps(payload or {}, ensure_ascii=False)
+
+
+@tool(timeout=40.0)
 async def create_checkpoint(ctx: RunContextWrapper[AquilaContext], label: str = "Aquila checkpoint") -> str:
     """Create a bounded working-tree checkpoint before a risky group of edits."""
     if ctx.context.mode not in MUTATING_MODES:
@@ -218,4 +239,4 @@ def tools_for_mode(mode: str, has_workspace: bool) -> list:
     read_tools = [list_repository_tree, search_repository, read_repository_file, inspect_git_status, inspect_git_diff]
     if mode not in MUTATING_MODES:
         return read_tools
-    return [*read_tools, create_checkpoint, write_repository_file, run_guarded_action]
+    return [*read_tools, create_feature_branch, create_checkpoint, write_repository_file, run_guarded_action]
