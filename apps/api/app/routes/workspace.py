@@ -274,7 +274,13 @@ async def git_diff(workspace_id: str) -> dict:
 
 @router.get("/{workspace_id}/git/review")
 async def git_review(workspace_id: str) -> dict:
-    return await _review_snapshot(workspace_id)
+    # Surface newly created files during the read-only human review. `git add -N`
+    # makes untracked text files visible to `git diff` without staging their
+    # contents; always restore the index before returning.
+    try:
+        return await _review_snapshot(workspace_id, include_intent_add=True)
+    finally:
+        await _unstage_best_effort(workspace_id)
 
 
 @router.post("/{workspace_id}/git/branches", status_code=201)
