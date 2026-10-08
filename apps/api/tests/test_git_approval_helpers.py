@@ -1,4 +1,7 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
+
+from app.routes import workspace
 
 from app.routes.workspace import (
     COMMIT_APPROVALS,
@@ -72,3 +75,28 @@ def test_expired_approval_is_removed() -> None:
     }
     _clean_approvals()
     assert approval_id not in COMMIT_APPROVALS
+
+
+def test_delivery_review_includes_untracked_files_and_restores_index(monkeypatch) -> None:
+    actions: list[str] = []
+
+    async def fake_action(workspace_id: str, action: str) -> dict:
+        assert workspace_id == "a" * 32
+        actions.append(action)
+        payloads = {
+            "git_intent_add": {"exit_code": 0, "output": ""},
+            "git_branch": {"exit_code": 0, "output": "main\n"},
+            "git_head": {"exit_code": 0, "output": "b" * 40 + "\n"},
+            "git_status": {"exit_code": 0, "output": "## main\n A backend/app.py\n"},
+            "git_diff_review": {"exit_code": 0, "output": "diff --git a/backend/app.py b/backend/app.py\nnew file mode 100644\n"},
+            "git_unstage_all": {"exit_code": 0, "output": ""},
+        }
+        return payloads[action]
+
+    monkeypatch.setattr(workspace, "_action", fake_action)
+    review = asyncio.run(workspace.git_review("a" * 32))
+
+    assert review["changed_paths"] == ["backend/app.py"]
+    assert "new file mode" in review["diff"]
+    assert actions[0] == "git_intent_add"
+    assert actions[-1] == "git_unstage_all"
