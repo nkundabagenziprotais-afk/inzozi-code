@@ -54,13 +54,33 @@ def prepare(cwd: Path) -> dict:
         raise RuntimeError("Guarded-runtime Node catalog is unavailable")
 
     target = cwd / "node_modules"
+    marker = target / ".inzozi-catalog.json"
     if target.is_symlink():
-        if target.resolve() != CATALOG_MODULES.resolve():
-            raise RuntimeError("Existing node_modules symlink does not point to the approved catalog")
-    elif target.exists():
-        raise RuntimeError("Existing node_modules must be removed or reviewed before node_prepare")
-    else:
-        target.symlink_to(CATALOG_MODULES, target_is_directory=True)
+        raise RuntimeError("Existing node_modules symlink must be removed before node_prepare")
+    if target.exists() and not target.is_dir():
+        raise RuntimeError("Existing node_modules is not a directory")
+    if target.exists() and not marker.is_file():
+        raise RuntimeError("Existing node_modules was not prepared by the guarded runtime")
+    target.mkdir(exist_ok=True)
+
+    # Keep the project-level node_modules directory writable for tool caches
+    # (for example Vitest's node_modules/.vite) while exposing only the fixed,
+    # build-time approved catalog through symlinks. Node's resolution follows
+    # those symlinks back into the immutable catalog for transitive packages.
+    for entry in CATALOG_MODULES.iterdir():
+        if entry.name.startswith(".vite") or entry.name == ".cache":
+            continue
+        link = target / entry.name
+        if link.exists() or link.is_symlink():
+            if not link.is_symlink() or link.resolve() != entry.resolve():
+                raise RuntimeError(f"Existing node_modules entry is not approved: {entry.name}")
+            continue
+        link.symlink_to(entry, target_is_directory=entry.is_dir())
+
+    marker.write_text(
+        json.dumps({"catalog_root": str(CATALOG_ROOT)}, separators=(",", ":")),
+        encoding="utf-8",
+    )
 
     return {
         "status": "prepared",
