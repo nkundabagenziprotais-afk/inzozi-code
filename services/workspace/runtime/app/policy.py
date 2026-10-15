@@ -31,7 +31,7 @@ RECIPES: dict[str, CommandRecipe] = {
     "python_compile": CommandRecipe(("python", "-m", "compileall", "."), 120),
     "python_tests": CommandRecipe(("python", "-m", "pytest", "-q"), 180),
     "node_prepare": CommandRecipe(("python", "/runtime/app/node_prepare.py"), 120),
-    "node_build": CommandRecipe(("npm", "run", "build"), 180),
+    "node_build": CommandRecipe(("npm", "run", "build"), 300),
     "node_test": CommandRecipe(("npm", "test"), 180),
     "node_lint": CommandRecipe(("npm", "run", "lint"), 180),
     "php_tests": CommandRecipe(("php", "artisan", "test"), 180),
