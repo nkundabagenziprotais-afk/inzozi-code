@@ -1,4 +1,6 @@
-from app.agents.workspace_tools import allowed_actions_for_mode, tools_for_mode
+import pytest
+
+from app.agents.workspace_tools import allowed_actions_for_mode, branch_action_for, tools_for_mode
 
 
 def tool_names(mode: str) -> set[str]:
@@ -44,3 +46,16 @@ def test_build_and_debug_receive_only_guarded_mutation_tools() -> None:
 
 def test_no_workspace_means_no_repository_tools() -> None:
     assert tools_for_mode("build", has_workspace=False) == []
+
+
+def test_branch_action_uses_guarded_runtime_recipe() -> None:
+    assert branch_action_for(" feature/audio-capture-mvp ") == "git_create_branch:feature/audio-capture-mvp"
+
+
+@pytest.mark.parametrize(
+    "branch_name",
+    ["main", "Feature/name", "feature/a", "feature/name with space", "feature/../../bad"],
+)
+def test_branch_action_rejects_unsafe_names(branch_name: str) -> None:
+    with pytest.raises(ValueError):
+        branch_action_for(branch_name)
