@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import uuid
 from datetime import datetime, timezone
@@ -109,25 +110,28 @@ def _audit(workspace_id: str, event: str, details: dict) -> None:
         handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def _terminate_process_group(process: subprocess.Popen[bytes], sig: signal.Signals) -> None:
+    try:
+        os.killpg(process.pid, sig)
+    except ProcessLookupError:
+        return
+
+
 def _run(argv: tuple[str, ...] | list[str], cwd: Path, timeout: int, extra_env: dict[str, str] | None = None) -> dict:
     env = os.environ.copy()
     env.update({"GIT_TERMINAL_PROMPT": "0", "CI": "1"})
     if extra_env:
         env.update(extra_env)
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             list(argv),
             cwd=cwd,
             env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            timeout=timeout,
-            check=False,
+            start_new_session=True,
         )
-    except subprocess.TimeoutExpired as exc:
-        output = (exc.stdout or b"")[-MAX_OUTPUT_BYTES:].decode("utf-8", errors="replace")
-        return {"exit_code": 124, "output": output, "timed_out": True}
     except FileNotFoundError:
         executable = str(argv[0]) if argv else "unknown"
         return {
@@ -143,8 +147,25 @@ def _run(argv: tuple[str, ...] | list[str], cwd: Path, timeout: int, extra_env: 
             "timed_out": False,
             "unavailable": True,
         }
-    output = completed.stdout[-MAX_OUTPUT_BYTES:].decode("utf-8", errors="replace")
-    return {"exit_code": completed.returncode, "output": output, "timed_out": False}
+
+    try:
+        stdout, _ = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        partial = exc.stdout or b""
+        _terminate_process_group(process, signal.SIGTERM)
+        try:
+            stdout, _ = process.communicate(timeout=5)
+        except subprocess.TimeoutExpired as term_exc:
+            if term_exc.stdout:
+                partial = term_exc.stdout
+            _terminate_process_group(process, signal.SIGKILL)
+            stdout, _ = process.communicate()
+        output_bytes = stdout or partial
+        output = output_bytes[-MAX_OUTPUT_BYTES:].decode("utf-8", errors="replace")
+        return {"exit_code": 124, "output": output, "timed_out": True}
+
+    output = stdout[-MAX_OUTPUT_BYTES:].decode("utf-8", errors="replace")
+    return {"exit_code": process.returncode, "output": output, "timed_out": False}
 
 
 def _git_auth_environment(root: Path, token: str) -> tuple[dict[str, str], Path]:
