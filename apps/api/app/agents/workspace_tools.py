@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 from typing import Any
 
 import httpx
@@ -10,6 +11,7 @@ from agents.decorators import tool
 
 
 MUTATING_MODES = {"build", "debug"}
+_SAFE_BRANCH_RE = re.compile(r"^(feature|fix|ui|hotfix|deploy)/[a-z0-9][a-z0-9._-]{2,80}$")
 APPROVED_ACTIONS = {
     "python_compile",
     "python_tests",
@@ -141,23 +143,37 @@ async def inspect_git_diff(ctx: RunContextWrapper[AquilaContext]) -> str:
     return str((payload or {}).get("output", ""))
 
 
+def branch_action_for(branch_name: str) -> str:
+    cleaned = branch_name.strip()
+    if not _SAFE_BRANCH_RE.fullmatch(cleaned):
+        raise ValueError(
+            "Branch name must use feature/, fix/, ui/, hotfix/, or deploy/ with a safe lowercase slug"
+        )
+    return f"git_create_branch:{cleaned}"
+
+
 @tool(timeout=40.0)
 async def create_feature_branch(ctx: RunContextWrapper[AquilaContext], branch_name: str) -> str:
-    """Create one safe feature/fix/ui/hotfix/deploy branch through the guarded Git workflow.
+    """Create one safe feature/fix/ui/hotfix/deploy branch through the guarded runtime.
 
-    This tool is available only in Build or Debug mode and delegates all branch-name
-    validation and protected-branch enforcement to the existing workspace API.
+    This tool is available only in Build or Debug mode. It sends only the existing
+    policy-gated ``git_create_branch:<name>`` action to the workspace manager; the
+    runtime policy remains the final branch-name and Git-operation enforcement layer.
 
     Args:
         branch_name: Safe branch name such as ``feature/notebook-foundation``.
     """
     if ctx.context.mode not in MUTATING_MODES:
         return "Denied: branch creation is only available in Build or Debug mode."
+    try:
+        action = branch_action_for(branch_name)
+    except ValueError as exc:
+        return f"Denied: {exc}"
     payload = await workspace_request(
         ctx.context,
         "POST",
-        "/git/branches",
-        payload={"branch_name": branch_name.strip()},
+        "/actions",
+        payload={"action": action},
     )
     return json.dumps(payload or {}, ensure_ascii=False)
 
